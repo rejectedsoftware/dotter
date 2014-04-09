@@ -1,0 +1,10 @@
+{
+	"name": "dotter",
+	"description": "Efficient statically checked data(base) mapping framework",
+	"copyright": "Copyright © 2014, rejectedsoftware e.K.",
+	"authors": ["Sönke Ludwig"],
+	"dependencies": {
+		"vibe-d": {"version": "~>0.7.19-rc.3", "optional": true},
+		"mysql-native": {"version": "~>0.0.12", "optional": true}
+	}
+}
