@@ -17,7 +17,10 @@ void testDriver(alias CREATE_DRIVER)()
 	auto drv = CREATE_DRIVER!Tables();
 	auto db = createORM(drv);
 
+	db.users.insert(0, "Dummy", 0);
 	db.users.removeAll();
+	assert(db.users.find().map!(u => u.toTuple()).empty);
+
 	db.users.insert(0, "Peter", 21);
 	db.users.insert(1, "Stacy", 33);
 	db.users.insert(2, "Tom", 45);
@@ -39,6 +42,8 @@ void testDriver(alias CREATE_DRIVER)()
 	]));
 
 	db.groupMembers.removeAll();
+	assert(db.groupMembers.find().map!(gm => gm.toTuple()).empty);
+
 	db.groupMembers.insert(0, 1, "admin");
 	db.groupMembers.insert(1, 1, "member");
 	db.groupMembers.insert(2, 0, "member");
@@ -68,6 +73,8 @@ void testDriver(alias CREATE_DRIVER)()
 	]));
 
 	db.groups.removeAll();
+	assert(db.groups.find().map!(g => g.toTuple()).empty);
+
 	db.groups.insert("computer", [0, 2, 3, 8]);
 	db.groups.insert("stitching", [1, 4, 5, 9]);
 	db.groups.insert("cooking", [6, 7, 10, 11]);
