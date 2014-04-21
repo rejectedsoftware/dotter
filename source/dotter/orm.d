@@ -16,7 +16,7 @@ module dotter.orm;
 
 import dotter.internal.uda;
 
-import std.algorithm : map;
+import std.algorithm : canFind, countUntil, map;
 import std.string : format;
 import std.traits;
 import std.typetuple;
@@ -40,16 +40,16 @@ unittest {
 		User users;
 	}
 
-	//import dotter.drivers.mongodb; auto dbdriver = new MongoDBDriver!Tables("127.0.0.1", "test");
-	auto dbdriver = new InMemoryORMDriver!Tables;
+	import dotter.drivers.mongodb; auto dbdriver = new MongoDBDriver!Tables("127.0.0.1", "test");
+	//auto dbdriver = new InMemoryORMDriver!Tables;
 
 	auto db = createORM(dbdriver);
-	db.removeAll!User();
-	db.insert!User(0, "Tom", 45);
-	db.insert!User(1, "Peter", 13);
-	db.insert!User(2, "Peter", 42);
-	db.insert!User(3, "Foxy", 8);
-	db.insert!User(4, "Peter", 69);
+	db.users.removeAll();
+	db.users.insert(0, "Tom", 45);
+	db.users.insert(1, "Peter", 13);
+	db.users.insert(2, "Peter", 42);
+	db.users.insert(3, "Foxy", 8);
+	db.users.insert(4, "Peter", 69);
 
 	assert(db.find(and(var!User.name("Peter"), var!User.age.greater(29))).map!(r => r.toTuple).equal([
 		tuple(2, "Peter", 42),
@@ -105,17 +105,17 @@ unittest {
 	auto dbdriver = new InMemoryORMDriver!Tables;
 	auto db = createORM(dbdriver);
 
-	db.removeAll!User();
-	db.insert!User("Tom");
-	db.insert!User("Peter");
-	db.insert!User("Foxy");
-	db.insert!User("Lynn");
-	db.insert!User("Hartmut");
+	db.users.removeAll();
+	db.users.insert("Tom");
+	db.users.insert("Peter");
+	db.users.insert("Foxy");
+	db.users.insert("Lynn");
+	db.users.insert("Hartmut");
 
-	db.removeAll!Box();
-	db.insert!Box("box 1", ["Tom", "Foxy"]);
-	db.insert!Box("box 2", ["Tom", "Hartmut", "Lynn"]);
-	db.insert!Box("box 3", ["Lynn", "Hartmut", "Peter"]);
+	db.boxes.removeAll();
+	db.boxes.insert("box 1", ["Tom", "Foxy"]);
+	db.boxes.insert("box 2", ["Tom", "Hartmut", "Lynn"]);
+	db.boxes.insert("box 3", ["Lynn", "Hartmut", "Peter"]);
 
 	assert(db.find!Box(var!Box.users.contains("Hartmut") & var!Box.users.contains("Lynn")).map!(b => b.name).equal([
 		"box 2", "box 3"
@@ -276,20 +276,20 @@ unittest {
 	auto dbdriver = new InMemoryORMDriver!Tables;
 	auto db = createORM(dbdriver);
 
-	db.removeAll!User();
-	db.insert!User("Peter");
-	db.insert!User("Linda");
-	db.insert!User("Tom");
+	db.users.removeAll();
+	db.users.insert("Peter");
+	db.users.insert("Linda");
+	db.users.insert("Tom");
 
-	db.removeAll!GroupMember();
-	db.insert!GroupMember(0, "Peter", "leader");
-	db.insert!GroupMember(1, "Tom", "worker");
-	db.insert!GroupMember(2, "Linda", "leader");
-	db.insert!GroupMember(3, "Peter", "staff");
+	db.groupMembers.removeAll();
+	db.groupMembers.insert(0, "Peter", "leader");
+	db.groupMembers.insert(1, "Tom", "worker");
+	db.groupMembers.insert(2, "Linda", "leader");
+	db.groupMembers.insert(3, "Peter", "staff");
 
-	db.removeAll!Group();
-	db.insert!Group("drivers", [0, 1]);
-	db.insert!Group("sellers", [2, 3]);
+	db.groups.removeAll();
+	db.groups.insert("drivers", [0, 1]);
+	db.groups.insert("sellers", [2, 3]);
 
 	// determine the groups that "linda" is in
 	assert(db.find!Group(var!Group.members.contains(var!GroupMember) & var!GroupMember.user("Linda"))
@@ -427,6 +427,7 @@ class ORM(DRIVER) {
 		auto find(QUERY)(QUERY query)
 		{
 			static if (FIELDS.length == 0) {
+				static assert(QueryTables!QUERY.length == 1, "Query accesses multiple tables, need to specify the result table explicitly.");
 				alias T = QueryTable!QUERY;
 				enum tidx = tableIndex!(T, Tables);
 				return m_driver.find!(RawRow!(Driver, T), QUERY)(query).map!(r => new Row!(ORM, T)(this, r));
@@ -501,6 +502,29 @@ class ORM(DRIVER) {
 	{
 		return m_driver.remove(QUERY);
 	}*/
+
+	@property auto opDispatch(string name)() if (tableNames.canFind(name))
+	{
+		enum tidx = tableNames.countUntil(name);
+		return Table!(ORM, tidx)(this);
+	}
+}
+
+struct Table(ORM, size_t INDEX) {
+	enum tableIndex = INDEX;
+	alias TableType = ORM.TableTypes[tableIndex];
+	enum tableName = ORM.tableNames[tableIndex];
+
+	private {
+		ORM m_db;
+	}
+
+	this(ORM db) { m_db = db; }
+
+	auto find(QUERY)(QUERY query) { return m_db.find!TableType(query); }
+	auto find()() { return m_db.find!TableType(QueryAnyExpr.init); }
+	void insert(FIELDS...)(FIELDS fields) { m_db.insert!TableType(fields); }
+	void removeAll() { m_db.removeAll!TableType(); }
 }
 
 
@@ -705,11 +729,12 @@ template ComparatorType(T)
 }
 struct ConjunctionExpr(EXPRS...) { EXPRS exprs; }
 struct DisjunctionExpr(EXPRS...) { EXPRS exprs; }
+struct QueryAnyExpr {} // dummy expression to match anything
 
 private template isOperand(T, FIELD)
 {
 	alias FieldComparator = ComparatorType!FIELD;
-	static if (is(T == FieldComparator)) enum isOperand = true;
+	static if (is(T : FieldComparator)) enum isOperand = true;
 	else static if (isInstanceOf!(VarColumn, T) && is(T.FieldComparator == FieldComparator)) enum isOperand = true;
 	else static if (isInstanceOf!(Var, T) && is(PrimaryKeyType!(T.TableType) == FieldComparator)) enum isOperand = true;
 	else enum isOperand = false;
@@ -912,6 +937,8 @@ template QueryTables(QUERIES...) if (QUERIES.length > 0) {
 			enum QueryTables = [Q.tableName];
 		} else static if (isTableDefinition!Q) {
 			enum QueryTables = [Q.stringof~"."];
+		} else static if (is(Q == QueryAnyExpr)) {
+			enum string[] QueryTables = [];
 		} else static assert(false, "Invalid query type: "~Q.stringof);
 	} else static if (QUERIES.length > 1) {
 		import std.algorithm : canFind;
