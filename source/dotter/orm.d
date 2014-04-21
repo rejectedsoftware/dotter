@@ -117,13 +117,8 @@ unittest {
 	db.insert!Box("box 2", ["Tom", "Hartmut", "Lynn"]);
 	db.insert!Box("box 3", ["Lynn", "Hartmut", "Peter"]);
 
-	import std.stdio;
-	import std.array;
-	writefln("RES: %s", array(db.find(var!Box.users.contains("Hartmut") & var!Box.users.contains("Lynn")).map!(r => r.toTuple)));
-
-	assert(db.find!Box(var!Box.users.contains("Hartmut") & var!Box.users.contains("Lynn")).map!(r => r.toTuple).equal([
-		tuple("box 2", ["Tom", "Hartmut", "Lynn"]),
-		tuple("box 3", ["Lynn", "Hartmut", "Peter"])
+	assert(db.find!Box(var!Box.users.contains("Hartmut") & var!Box.users.contains("Lynn")).map!(b => b.name).equal([
+		"box 2", "box 3"
 	]));
 }
 
@@ -298,18 +293,13 @@ unittest {
 
 	// determine the groups that "linda" is in
 	assert(db.find!Group(var!Group.members.contains(var!GroupMember) & var!GroupMember.user("Linda"))
-		.map!(r => r.toTuple()).equal([
-			tuple("sellers", [2, 3])
-		]));
+		.map!(g => g.name).equal(["sellers"]));
 
 	// determine all users in group "drivers"
 	assert(db.find!User(var!Group.name("drivers") & var!Group.members.contains(var!GroupMember) & var!GroupMember.user(var!User.name))
-		.map!(r => r.toTuple()).equal([
-			tuple("Peter"),
-			tuple("Tom")
-		]));
+		.map!(u => u.name).equal(["Peter", "Tom"]));
 
-	// find co-workers of Linda
+	// find co-workers of Linda using named variables
 	GroupMember m1, m2;
 	assert(db.find!User(
 			var!Group.members.contains(var!m1) &
@@ -317,9 +307,7 @@ unittest {
 			var!m1.user("Linda") &
 			var!m2.user(var!User.name) &
 			var!User.name.notEqual("Linda"))
-		.map!(r => r.toTuple()).equal([
-			tuple("Peter")
-		]));
+		.map!(u => u.name).equal(["Peter"]));
 
 	/*import std.array;
 	import vibe.core.log;
@@ -418,7 +406,7 @@ class ORM(TABLES, DRIVER) {
 		foreach (i, tname; __traits(allMembers, Tables)) {
 			//pragma(msg, "TAB "~tname);
 			alias Table = typeof(__traits(getMember, Tables, tname));
-			static assert(isTableDefinition!Table, "Table defintion lacks @TableDefinition UDA: "~Table.stringof);
+			static assert(isTableDefinition!Table, "Table defintion lacks @tableDefinition UDA: "~Table.stringof);
 			m_tables[i] = driver.getTableHandle!Table(tname);
 			foreach (f; __traits(allMembers, Table)) {
 				alias FieldType = typeof(__traits(getMember, Table, f));
@@ -538,9 +526,57 @@ class ORM(TABLES, DRIVER) {
 /* QUERY EXPRESSIONS                                                          */
 /******************************************************************************/
 
-Var!TABLE var(TABLE...)() { return Var!TABLE.init; }
-VarColumn!(COLUMN, TABLE, TABLE_NAME) cmpcolumn(string COLUMN, TABLE, string TABLE_NAME)() { return VarColumn!(COLUMN, TABLE, TABLE_NAME).init; }
+/**
+	Yields a symbolic variable used for query expressions.
 
+	The argument can either be a table definition type, or a variable of such a
+	type. The latter notion can be used to create query expressions with
+	variables matching different rows of the same table.
+*/
+Var!TABLE var(TABLE...)() { return Var!TABLE.init; }
+
+///
+unittest {
+	import dotter.drivers.inmemory;
+	import std.algorithm : equal;
+
+	@tableDefinition
+	struct Employee {
+		static:
+		@primaryKey string name;
+		string role;
+	}
+
+	struct Tables {
+		Employee employees;
+	}
+
+
+	auto drv = new InMemoryORMDriver;
+	auto db = createORM!Tables(drv);
+
+	db.removeAll!Employee();
+	db.insert!Employee("Peter", "worker");
+	db.insert!Employee("Linda", "worker");
+	db.insert!Employee("Jack", "seller");
+	db.insert!Employee("Tom", "worker");
+	db.insert!Employee("Stacy", "seller");
+	db.insert!Employee("Patrick", "seller");
+
+	// find all workers
+	assert(db.find(var!Employee.role.equal("worker")).map!(e => e.name)
+		.equal(["Peter", "Linda", "Tom"]));
+
+	// find all employees that have the same role as Stacy using an additional named variable
+	Employee stacy;
+	assert(db.find!Employee(var!Employee.role.equal(var!stacy.role) & var!stacy.name.equal("Stacy")).map!(e => e.name)
+		.equal(["Jack", "Stacy", "Patrick"]));
+}
+
+
+/**
+	Represents a symbols variable for use in query expressions.
+*/
 struct Var(TABLE...)
 	if (TABLE.length == 1 && (is(TABLE) && isTableDefinition!TABLE || isTableDefinition!(typeof(TABLE))))
 {
@@ -566,6 +602,11 @@ struct Var(TABLE...)
 	mixin CmpFields!(__traits(allMembers, TableType));
 }
 
+private VarColumn!(COLUMN, TABLE, TABLE_NAME) cmpcolumn(string COLUMN, TABLE, string TABLE_NAME)() { return VarColumn!(COLUMN, TABLE, TABLE_NAME).init; }
+
+/**
+	Represents a single column of a symbolic query variable.
+*/
 struct VarColumn(string COLUMN, TABLE, string TABLE_NAME)
 	if (isTableDefinition!TABLE)
 {
@@ -599,9 +640,25 @@ struct VarColumn(string COLUMN, TABLE, string TABLE_NAME)
 	}
 }
 
-@property auto and(EXPRS...)(EXPRS exprs) { return ConjunctionExpr!EXPRS(exprs); }
-@property auto or(EXPRS...)(EXPRS exprs) { return DisjunctionExpr!EXPRS(exprs); }
-//JoinExpr!()
+/**
+	Performs a logical AND operation between two query expressions.
+
+	The same can be achieved using the $(D &amp;) operator.
+
+	See_also:
+		CompareExpr.opBinaryRight
+*/
+auto and(EXPRS...)(EXPRS exprs) { return ConjunctionExpr!EXPRS(exprs); }
+
+/**
+	Performs a logical OR operation between two query expressions.
+
+	The same can be achieved using the $(D |) operator.
+
+	See_also:
+		CompareExpr.opBinaryRight
+*/
+auto or(EXPRS...)(EXPRS exprs) { return DisjunctionExpr!EXPRS(exprs); }
 
 struct CompareExpr(string TABLE_NAME, alias FIELD, CompareOp OP, MATCH...)
 	if (MATCH.length == 1)
@@ -629,9 +686,17 @@ struct CompareExpr(string TABLE_NAME, alias FIELD, CompareOp OP, MATCH...)
 		V value;
 	}
 
-	auto opBinaryRight(string op, T)(T other) if(op == "|") { return DisjunctionExpr!(T, typeof(this))(other, this); }
-	auto opBinaryRight(string op, T)(T other) if(op == "&") { return ConjunctionExpr!(T, typeof(this))(other, this); }
-	//auto opBinaryRight(string op, T)(T other) if (op == "|" && isInstanceOf)
+	auto opBinaryRight(string op, T)(T other) if(op == "|")
+	{
+		static if (isInstanceOf!(DisjunctionExpr, T)) return or(other.exprs, this);
+		else return or(other, this);
+	}
+
+	auto opBinaryRight(string op, T)(T other) if(op == "&")
+	{
+		static if (isInstanceOf!(ConjunctionExpr, T)) return and(other.exprs, this);
+		else return and(other, this);
+	}
 }
 enum CompareOp {
 	equal,
