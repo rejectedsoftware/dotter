@@ -100,15 +100,17 @@ private mixin template MongoQuery(size_t idx, QUERIES...) {
 		static assert(!is(typeof(QUERIES[0])) || is(typeof(QUERIES[0])), "Arguments to MongoQuery must be types.");
 		alias Q = QUERIES[0];
 
-		static if (isInstanceOf!(ComparatorExpr, Q)) {
-			static if (Q.comp == Comparator.equal) mixin("Q.V "~Q.name~";");
-			else static if (Q.comp == Comparator.notEqual) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$ne")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
-			else static if (Q.comp == Comparator.greater) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$gt")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
-			else static if (Q.comp == Comparator.greaterEqual) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$gte")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
-			else static if (Q.comp == Comparator.less) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$lt")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
-			else static if (Q.comp == Comparator.lessEqual) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$lte")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
-			else static if (Q.comp == Comparator.containsAll) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$all")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
-			else static assert(false, format("Unsupported comparator: %s", Q.comp));
+		static if (isInstanceOf!(CompareExpr, Q)) {
+			static if (Q.op == CompareOp.equal) mixin("Q.V "~Q.name~";");
+			else static if (Q.op == CompareOp.notEqual) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$ne")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
+			else static if (Q.op == CompareOp.greater) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$gt")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
+			else static if (Q.op == CompareOp.greaterEqual) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$gte")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
+			else static if (Q.op == CompareOp.less) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$lt")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
+			else static if (Q.op == CompareOp.lessEqual) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$lte")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
+			else static assert(false, format("Unsupported compare operator: %s", Q.comp));
+		} else static if (isInstanceOf!(MatchExpr, Q)) {
+			static if (Q.op == CompareOp.all) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$all")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
+			else static assert(false, format("Unsupported match operator: %s", Q.comp));
 		} else static if (isInstanceOf!(ConjunctionExpr, Q)) {
 			//mixin(format(`static struct Q%s { mixin MongoQuery!(0, Q.exprs); } @(vibe.data.serialization.name("$and")) Q%s q%s;`, idx, idx, idx));
 			mixin MongoQuery!(0, typeof(Q.exprs));
@@ -133,8 +135,8 @@ private static string initializeMongoQuery(size_t idx, QUERY)(string name, strin
 	string ret;
 	alias Q = QUERY;
 
-	static if (isInstanceOf!(ComparatorExpr, Q)) {
-		final switch (Q.comp) with (Comparator) {
+	static if (isInstanceOf!(CompareExpr, Q)) {
+		final switch (Q.comp) with (CompareOp) {
 			case equal:
 				ret ~= format("%s.%s = %s.value;", name, Q.name, srcfield);
 				break;
