@@ -103,6 +103,12 @@ class InMemoryORMDriver(TABLES) {
 	}
 }
 
+unittest {
+	import dotter.test;
+	static auto createDriver(TABLES)() { return new InMemoryORMDriver!(TABLES)(); }
+	testDriver!(createDriver);
+}
+
 private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 {
 	alias Tables = DRIVER.TableTypes;
@@ -217,6 +223,12 @@ private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 			if (matches(query.exprs[i], rows))
 				return true;
 		return false;
+	}
+
+	private bool matches(Q, ROWS...)(ref Q query, ref ROWS rows)
+		if (is(Q == QueryAnyExpr))
+	{
+		return true;
 	}
 }
 
