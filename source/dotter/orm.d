@@ -40,10 +40,10 @@ unittest {
 		User users;
 	}
 
-	//auto dbdriver = new MongoDBDriver("127.0.0.1", "test");
-	auto dbdriver = new InMemoryORMDriver;
+	//import dotter.drivers.mongodb; auto dbdriver = new MongoDBDriver!Tables("127.0.0.1", "test");
+	auto dbdriver = new InMemoryORMDriver!Tables;
 
-	auto db = createORM!Tables(dbdriver);
+	auto db = createORM(dbdriver);
 	db.removeAll!User();
 	db.insert!User(0, "Tom", 45);
 	db.insert!User(1, "Peter", 13);
@@ -102,8 +102,8 @@ unittest {
 	}
 
 	//auto dbdriver = new MongoDBDriver("127.0.0.1", "test");
-	auto dbdriver = new InMemoryORMDriver;
-	auto db = createORM!Tables(dbdriver);
+	auto dbdriver = new InMemoryORMDriver!Tables;
+	auto db = createORM(dbdriver);
 
 	db.removeAll!User();
 	db.insert!User("Tom");
@@ -273,8 +273,8 @@ unittest {
 		GroupMember groupMembers;
 	}
 
-	auto dbdriver = new InMemoryORMDriver;
-	auto db = createORM!Tables(dbdriver);
+	auto dbdriver = new InMemoryORMDriver!Tables;
+	auto db = createORM(dbdriver);
 
 	db.removeAll!User();
 	db.insert!User("Peter");
@@ -386,35 +386,32 @@ struct OwnerByAttribute {}
 struct UnorderedAttribute {}
 
 
-ORM!(Tables, Driver) createORM(Tables, Driver)(Driver driver) { return new ORM!(Tables, Driver)(driver); }
+ORM!(Driver) createORM(Driver)(Driver driver) { return new ORM!(Driver)(driver); }
 
-class ORM(TABLES, DRIVER) {
-	alias Tables = TABLES;
+class ORM(DRIVER) {
+	alias Tables = DRIVER.Tables;
 	alias Driver = DRIVER;
-	alias TableTypes = TypeTuple!(typeof(TABLES.tupleof));
-	enum tableNames = [__traits(allMembers, TABLES)];
+	alias TableTypes = TypeTuple!(typeof(Tables.tupleof));
+	enum tableNames = [__traits(allMembers, Tables)];
 
 	private {
 		Driver m_driver;
-		Driver.TableHandle[TableTypes.length] m_tables;
 	}
 
 	this(Driver driver)
 	{
 		m_driver = driver;
 
+		// validate the table schema
 		foreach (i, tname; __traits(allMembers, Tables)) {
 			//pragma(msg, "TAB "~tname);
 			alias Table = typeof(__traits(getMember, Tables, tname));
 			static assert(isTableDefinition!Table, "Table defintion lacks @tableDefinition UDA: "~Table.stringof);
-			m_tables[i] = driver.getTableHandle!Table(tname);
 			foreach (f; __traits(allMembers, Table)) {
 				alias FieldType = typeof(__traits(getMember, Table, f));
 				static assert(isValidColumnType!FieldType, "Unsupported column type for "~tname~"."~f~": "~FieldType.stringof);
 			}
 		}
-
-		upgradeColumns();
 	}
 
 	/// The underlying database driver
@@ -432,11 +429,11 @@ class ORM(TABLES, DRIVER) {
 			static if (FIELDS.length == 0) {
 				alias T = QueryTable!QUERY;
 				enum tidx = tableIndex!(T, Tables);
-				return m_driver.find!(RawRow!(Driver, T), QUERY, TableTypes)(query, m_tables).map!(r => new Row!(ORM, T)(this, r));
+				return m_driver.find!(RawRow!(Driver, T), QUERY)(query).map!(r => new Row!(ORM, T)(this, r));
 			} else static if (FIELDS.length == 1 && isTableDefinition!(FIELDS[0])) {
 				alias T = FIELDS[0];
 				enum tidx = tableIndex!(T, Tables);
-				return m_driver.find!(RawRow!(Driver, T), QUERY, TableTypes)(query, m_tables).map!(r => new Row!(ORM, T)(this, r));
+				return m_driver.find!(RawRow!(Driver, T), QUERY)(query).map!(r => new Row!(ORM, T)(this, r));
 			} else {
 				static assert(false, "Selecting individual fields is not yet supported.");
 			}
@@ -463,25 +460,22 @@ class ORM(TABLES, DRIVER) {
 	*/
 	auto findRaw(TABLE, T...)(T params)
 	{
-		enum tidx = tableIndex!(T, Tables);
-		return m_driver.findRaw!(RawRow!(Driver, TABLE))(m_tables[tidx], params);
+		return m_driver.findRaw!(RawRow!(Driver, TABLE))(params);
 	}
 
 	void update(QUERY, UPDATE)(QUERY query, UPDATE update)
 	{
 		alias T = QueryTable!QUERY;
-		auto tidx = tableIndex!(T, Tables);
-		m_driver.update!(RawRow!(Driver, T), QUERY, UPDATE, TableTypes)(m_tables[tidx], query, update, m_tables);
+		m_driver.update!(RawRow!(Driver, T), QUERY, UPDATE)(query, update);
 	}
 
 	void insert(T, FIELDS...)(FIELDS fields)
 		if (isTableDefinition!T)
 	{
-		enum tidx = tableIndex!(T, Tables);
 		RawRow!(Driver, T) value;
 		// TODO: translate references to other tables automatically
 		value.tupleof = fields;
-		m_driver.insert(m_tables[tidx], value);
+		m_driver.insert(value);
 	}
 
 	/*void updateOrInsert(QUERY query)(QUERY query, QueryTable)
@@ -494,8 +488,7 @@ class ORM(TABLES, DRIVER) {
 	void removeAll(T)()
 		if (isTableDefinition!T)
 	{
-		enum tidx = tableIndex!(T, Tables);
-		m_driver.removeAll(m_tables[tidx]);
+		m_driver.removeAll!T();
 	}
 
 	/*void insert(T)(Item!T item)
@@ -508,11 +501,6 @@ class ORM(TABLES, DRIVER) {
 	{
 		return m_driver.remove(QUERY);
 	}*/
-
-	private void upgradeColumns()
-	{
-
-	}
 }
 
 
@@ -552,8 +540,8 @@ unittest {
 	}
 
 
-	auto drv = new InMemoryORMDriver;
-	auto db = createORM!Tables(drv);
+	auto drv = new InMemoryORMDriver!Tables;
+	auto db = createORM(drv);
 
 	db.removeAll!Employee();
 	db.insert!Employee("Peter", "worker");

@@ -22,32 +22,31 @@ import vibe.data.serialization;
 	The driver generates static types used to efficiently and directly
 	serialize query expressions to BSON without unnecessary memory allocations.
 */
-class MongoDBDriver {
+class MongoDBDriver(TABLES) {
 	import vibe.db.mongo.mongo;
 
 	private {
 		MongoDatabase m_db;
+		MongoCollection[] m_collections;
 	}
 
 	alias DefaultID = BsonObjectID;
 	alias TableHandle = MongoCollection;
 	alias ColumnHandle = string;
 	enum bool supportsArrays = true;
-	enum bool supportsJoins = false;
 
 	this(string url_or_host, string name)
 	{
 		auto cli = connectMongoDB(url_or_host);
 		m_db = cli.getDatabase(name);
-	}
 
-	MongoCollection getTableHandle(T)(string name)
-	{
-		// TODO: setup keys, especially the primary key!
-		return m_db[name];
+		foreach (tname; __traits(allMembers, TABLES)) {
+			m_collections ~= m_db[tname];
+			// TODO: setup keys!
+		}
 	}
 	
-	auto find(T, QUERY)(MongoCollection table, QUERY query)
+	auto find(T, QUERY, TABLES...)(QUERY query)
 	{
 		struct Query { mixin MongoQuery!(0, QUERY); }
 		Query mquery;
@@ -59,7 +58,7 @@ class MongoDBDriver {
 		return table.find(mquery).map!(b => deserializeBson!T(b));
 	}
 
-	void update(T, QUERY, UPDATE)(MongoCollection table, QUERY query, UPDATE update)
+	void update(T, QUERY, UPDATE)(QUERY query, UPDATE update)
 	{
 		struct Query { mixin MongoQuery!(0, QUERY); }
 		Query mquery;
@@ -76,17 +75,17 @@ class MongoDBDriver {
 		table.update(mquery, mupdate);
 	}
 
-	void insert(T)(MongoCollection table, T value)
+	void insert(T)(T value)
 	{
 		table.insert(value);
 	}
 
-	void updateOrInsert(T, QUERY)(size_t table, QUERY query, T value)
+	void updateOrInsert(T, QUERY)(QUERY query, T value)
 	{
 		assert(false);
 	}
 
-	void removeAll(MongoCollection table)
+	void removeAll(TABLE)()
 	{
 		table.remove(Bson.emptyObject);
 	}

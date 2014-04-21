@@ -24,12 +24,11 @@ import std.typetuple;
 	or disk access. However, it can also be useful in cases where persistence
 	isn't needed, but where the ORM interface is already used.
 */
-class InMemoryORMDriver {
+class InMemoryORMDriver(TABLES) {
+	alias Tables = TABLES;
 	alias DefaultID = size_t; // running index
-	alias TableHandle = size_t; // table index
-	alias ColumnHandle = size_t; // byte offset
+	alias TableTypes = TypeTuple!(typeof(Tables.tupleof));
 	enum bool supportsArrays = true;
-	enum bool supportsJoins = false;
 
 	private {
 		static struct Table {
@@ -42,52 +41,49 @@ class InMemoryORMDriver {
 		Table[] m_tables;
 	}
 
-	size_t getTableHandle(T)(string name)
+	this()
 	{
-		foreach (i, ref t; m_tables)
-			if (t.name == name)
-				return i;
-		//import vibe.core.log; logInfo("table %s %s", name, m_tables.length);
-		m_tables ~= Table(name);
-		return m_tables.length - 1;
+		foreach (tname; __traits(allMembers, TABLES)) {
+			m_tables ~= Table(tname);
+		}
 	}
 
-	auto find(T, QUERY, TABLES...)(QUERY query, ref size_t[TABLES.length] table_handles)
+	auto find(T, QUERY)(QUERY query)
 	{
 		/*import vibe.core.log;
 		logInfo("tables before query:");
 		foreach (i, t; m_tables)
 			logInfo("%s: %s %s", i, t.storage.length, t.rowCounter);*/
-		return MatchRange!(false, T, QUERY, TABLES)(this, query, table_handles);
+		return MatchRange!(false, T, QUERY, typeof(this))(this, query);
 	}
 
-	void update(T, QUERY, UPDATE, TABLES...)(size_t table, QUERY query, UPDATE update, ref size_t[TABLES.length] table_handles)
+	void update(T, QUERY, UPDATE)(QUERY query, UPDATE update)
 	{
-		auto ptable = &m_tables[table];
+		auto ptable = &m_tables[staticIndexOf!(T.Table, TableTypes)];
 		auto items = cast(T[])ptable.storage;
 		items = items[0 .. ptable.rowCounter];
-		foreach (ref itm; MatchRange!(true, T, QUERY, TABLES)(this, query, table_handles))
+		foreach (ref itm; MatchRange!(true, T, QUERY, typeof(this))(this, query))
 			applyUpdate(itm, update);
 	}
 
-	void insert(T)(size_t table, T value)
+	void insert(T)(T value)
 	{
 		import std.algorithm : max;
-		auto ptable = &m_tables[table];
+		auto ptable = &m_tables[staticIndexOf!(T.Table, TableTypes)];
 		if (ptable.storage.length <= ptable.rowCounter)
 			ptable.storage.length = max(16 * T.sizeof, ptable.storage.length * 2);
 		auto items = cast(T[])ptable.storage;
 		items[ptable.rowCounter++] = value;
 	}
 
-	void updateOrInsert(T, QUERY)(size_t table, QUERY query, T value)
+	void updateOrInsert(T, QUERY)(QUERY query, T value)
 	{
 		assert(false);
 	}
 
-	void removeAll(size_t table)
+	void removeAll(T)()
 	{
-		m_tables[table].rowCounter = 0;
+		m_tables[staticIndexOf!(T, TableTypes)].rowCounter = 0;
 	}
 
 	private static void applyUpdate(T, U)(ref T item, ref U query)
@@ -107,9 +103,9 @@ class InMemoryORMDriver {
 	}
 }
 
-private struct MatchRange(bool allow_modfications, T, QUERY, TABLES...)
+private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 {
-	alias Tables = TABLES;
+	alias Tables = DRIVER.TableTypes;
 	enum iterationTables = QueryTables!(T.Table, QUERY);
 	enum iterationTableIndex = tableIndicesOf!Tables(iterationTables);
 	alias IterationTableTypes = IndexedTypes!(iterationTableIndex, Tables);
@@ -119,19 +115,17 @@ private struct MatchRange(bool allow_modfications, T, QUERY, TABLES...)
 	enum resultIterationTableIndex = iterationTables.countUntil(T.Table.stringof~".");
 
 	private {
-		InMemoryORMDriver m_driver;
+		DRIVER m_driver;
 		QUERY m_query;
 		size_t[iterationTables.length] m_cursor;
 		bool m_empty = false;
-		size_t[Tables.length] m_handles;
 	}
 
-	this(InMemoryORMDriver driver, QUERY query, ref size_t[Tables.length] table_handles)
+	this(DRIVER driver, QUERY query)
 	{
 		m_driver = driver;
 		m_query = query;
 		m_cursor[] = 0;
-		m_handles = table_handles;
 		findNextMatch();
 	}
 
@@ -140,12 +134,12 @@ private struct MatchRange(bool allow_modfications, T, QUERY, TABLES...)
 	static if (allow_modfications) {
 		@property ref inout(T) front()
 		inout {
-			return m_driver.getItem!T(m_handles[resultTableIndex], m_cursor[resultIterationTableIndex]);
+			return m_driver.getItem!T(resultTableIndex, m_cursor[resultIterationTableIndex]);
 		}
 	} else {
 		@property ref const(T) front()
 		const {
-			return m_driver.getItem!T(m_handles[resultTableIndex], m_cursor[resultIterationTableIndex]);
+			return m_driver.getItem!T(resultTableIndex, m_cursor[resultIterationTableIndex]);
 		}
 	}
 
@@ -159,9 +153,9 @@ private struct MatchRange(bool allow_modfications, T, QUERY, TABLES...)
 	{
 		while (!empty) {
 			// 
-			RawRows!(InMemoryORMDriver, IterationTableTypes) values;
+			RawRows!(DRIVER, IterationTableTypes) values;
 			foreach (i, T; IterationTableTypes)
-				values[i] = m_driver.getItem!(RawRow!(InMemoryORMDriver, T))(m_handles[iterationTableIndex[i]], m_cursor[i]);
+				values[i] = m_driver.getItem!(RawRow!(DRIVER, T))(iterationTableIndex[i], m_cursor[i]);
 			//import std.stdio; writefln("TESTING %s %s", m_cursor, iterationTables);
 			//static if (values.length == 4) writefln("%s %s %s %s", values[0], values[1], values[2], values[3]);
 			if (matches(m_query, values)) break;
@@ -176,7 +170,7 @@ private struct MatchRange(bool allow_modfications, T, QUERY, TABLES...)
 		size_t first_table = next_result ? 1 : iterationTables.length;
 		m_cursor[first_table .. $] = 0;
 		foreach_reverse (i, ref idx; m_cursor[0 .. first_table]) {
-			if (++idx >= m_driver.m_tables[m_handles[iterationTableIndex[i]]].rowCounter) idx = 0;
+			if (++idx >= m_driver.m_tables[iterationTableIndex[i]].rowCounter) idx = 0;
 			else return;
 		}
 		m_empty = true;
