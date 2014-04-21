@@ -160,8 +160,14 @@ private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 		while (!empty) {
 			// 
 			RawRows!(DRIVER, IterationTableTypes) values;
-			foreach (i, T; IterationTableTypes)
+			foreach (i, T; IterationTableTypes) {
+				// if any affected table is empty, there cannot be a result
+				if (!m_driver.m_tables[iterationTableIndex[i]].rowCounter) {
+					m_empty = true;
+					break;
+				}
 				values[i] = m_driver.getItem!(RawRow!(DRIVER, T))(iterationTableIndex[i], m_cursor[i]);
+			}
 			//import std.stdio; writefln("TESTING %s %s", m_cursor, iterationTables);
 			//static if (values.length == 4) writefln("%s %s %s %s", values[0], values[1], values[2], values[3]);
 			if (matches(m_query, values)) break;
