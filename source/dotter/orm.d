@@ -51,26 +51,26 @@ unittest {
 	db.insert!User(3, "Foxy", 8);
 	db.insert!User(4, "Peter", 69);
 
-	assert(db.find(and(cmp!User.name("Peter"), cmp!User.age.greater(29))).map!(r => r.toTuple).equal([
+	assert(db.find(and(var!User.name("Peter"), var!User.age.greater(29))).map!(r => r.toTuple).equal([
 		tuple(2, "Peter", 42),
 		tuple(4, "Peter", 69)
 	]));
 
-	assert(db.find(cmp!User.name("Peter") & cmp!User.age.greater(29)).map!(r => r.toTuple).equal([
+	assert(db.find(var!User.name("Peter") & var!User.age.greater(29)).map!(r => r.toTuple).equal([
 		tuple(2, "Peter", 42),
 		tuple(4, "Peter", 69)
 	]));
 
-	assert(db.find(or(cmp!User.name("Peter"), cmp!User.age.greater(29))).map!(r => r.toTuple).equal([
+	assert(db.find(or(var!User.name("Peter"), var!User.age.greater(29))).map!(r => r.toTuple).equal([
 		tuple(0, "Tom", 45),
 		tuple(1, "Peter", 13),
 		tuple(2, "Peter", 42),
 		tuple(4, "Peter", 69)
 	]));
 
-	db.update(cmp!User.name("Tom"), set!(User.age)(20));
+	db.update(var!User.name("Tom"), set!(User.age)(20));
 
-	assert(db.find(cmp!User.name("Tom")).map!(r => r.toTuple).equal([
+	assert(db.find(var!User.name("Tom")).map!(r => r.toTuple).equal([
 		tuple(0, "Tom", 20)
 	]));
 }
@@ -119,9 +119,9 @@ unittest {
 
 	import std.stdio;
 	import std.array;
-	writefln("RES: %s", array(db.find(cmp!Box.users.contains("Hartmut") & cmp!Box.users.contains("Lynn")).map!(r => r.toTuple)));
+	writefln("RES: %s", array(db.find(var!Box.users.contains("Hartmut") & var!Box.users.contains("Lynn")).map!(r => r.toTuple)));
 
-	assert(db.find!Box(cmp!Box.users.contains("Hartmut") & cmp!Box.users.contains("Lynn")).map!(r => r.toTuple).equal([
+	assert(db.find!Box(var!Box.users.contains("Hartmut") & var!Box.users.contains("Lynn")).map!(r => r.toTuple).equal([
 		tuple("box 2", ["Tom", "Hartmut", "Lynn"]),
 		tuple("box 3", ["Lynn", "Hartmut", "Peter"])
 	]));
@@ -297,28 +297,33 @@ unittest {
 	db.insert!Group("sellers", [2, 3]);
 
 	// determine the groups that "linda" is in
-	assert(db.find!Group(cmp!Group.members.contains(cmp!GroupMember) & cmp!GroupMember.user("Linda")).map!(r => r.toTuple()).equal([
-		tuple("sellers", [2, 3])
-	]));
+	assert(db.find!Group(var!Group.members.contains(var!GroupMember) & var!GroupMember.user("Linda"))
+		.map!(r => r.toTuple()).equal([
+			tuple("sellers", [2, 3])
+		]));
 
 	// determine all users in group "drivers"
-	assert(db.find!User(cmp!Group.name("drivers") & cmp!Group.members.contains(cmp!GroupMember) & cmp!GroupMember.user(cmp!User.name)).map!(r => r.toTuple()).equal([
-		tuple("Peter"),
-		tuple("Tom")
-	]));
+	assert(db.find!User(var!Group.name("drivers") & var!Group.members.contains(var!GroupMember) & var!GroupMember.user(var!User.name))
+		.map!(r => r.toTuple()).equal([
+			tuple("Peter"),
+			tuple("Tom")
+		]));
 
 	// find co-workers of Linda
 	GroupMember m1, m2;
-	import std.array;
+	assert(db.find!User(
+			var!Group.members.contains(var!m1) &
+			var!Group.members.contains(var!m2) &
+			var!m1.user("Linda") &
+			var!m2.user(var!User.name) &
+			var!User.name.notEqual("Linda"))
+		.map!(r => r.toTuple()).equal([
+			tuple("Peter")
+		]));
+
+	/*import std.array;
 	import vibe.core.log;
-	logInfo("RESULT: %s", db.find!User(cmp!Group.members.contains(cmp!m1) & cmp!Group.members.contains(cmp!m2) & cmp!m1.user("Linda") & cmp!m2.user(cmp!User) & cmp!User.name.notEqual("Linda")).map!(r => r.toTuple()).array);
-	assert(db.find!User(cmp!Group.members.contains(cmp!m1) & cmp!Group.members.contains(cmp!m2) & cmp!m1.user("Linda") & cmp!m2.user(cmp!User.name) & cmp!User.name.notEqual("Linda")).map!(r => r.toTuple()).equal([
-		tuple("Peter")
-	]));
-	//db.find(cmp!User.groups.members.matchesAll!(GroupMember.user("Linda"), GroupMember.user(User.name)), cmp!User.name.notEqual("Linda"));
-	/*assert(db.find!User(cmp!Group.members.matchesAll(cmp!GroupMember.user("Linda"), cmp!GroupMember.user(User.name)) & cmp!User.name.notEqual("Linda")).map!(r => r.toTuple()).equal([
-		tuple("Peter")
-	]));*/
+	logInfo("RESULT: %s", db.find!User(var!Group.members.contains(var!m1) & var!Group.members.contains(var!m2) & var!m1.user("Linda") & var!m2.user(var!User) & var!User.name.notEqual("Linda")).map!(r => r.toTuple()).array);*/
 }
 
 
@@ -340,7 +345,7 @@ auto dummy = q{
 	auto res = m_db.find(Cmp!User.name("Peter") & Cmp!User.age(greater(min_age)));
 	// requires different way to define the tables
 	auto res = m_db.find(User.name.equal("Peter") & User.age.greater(min_age));
-	auto res = m_db.find(User.name.cmp!"=="("Peter") & User.age.cmp!">"(min_age));
+	auto res = m_db.find(User.name.var!"=="("Peter") & User.age.var!">"(min_age));
 	auto res = m_db.find(User.name("Peter") & User.age!">"(min_age));
 	auto res = m_db.find(User.name("Peter") & User.age(greater(min_age)));
 	// short for complex expressions, but long for simple ones
@@ -533,10 +538,10 @@ class ORM(TABLES, DRIVER) {
 /* QUERY EXPRESSIONS                                                          */
 /******************************************************************************/
 
-CMP!TABLE cmp(TABLE...)() { return CMP!TABLE.init; }
-CMPColumn!(COLUMN, TABLE, TABLE_NAME) cmpcolumn(string COLUMN, TABLE, string TABLE_NAME)() { return CMPColumn!(COLUMN, TABLE, TABLE_NAME).init; }
+Var!TABLE var(TABLE...)() { return Var!TABLE.init; }
+VarColumn!(COLUMN, TABLE, TABLE_NAME) cmpcolumn(string COLUMN, TABLE, string TABLE_NAME)() { return VarColumn!(COLUMN, TABLE, TABLE_NAME).init; }
 
-struct CMP(TABLE...)
+struct Var(TABLE...)
 	if (TABLE.length == 1 && (is(TABLE) && isTableDefinition!TABLE || isTableDefinition!(typeof(TABLE))))
 {
 	static if (is(TABLE)) {
@@ -561,7 +566,7 @@ struct CMP(TABLE...)
 	mixin CmpFields!(__traits(allMembers, TableType));
 }
 
-struct CMPColumn(string COLUMN, TABLE, string TABLE_NAME)
+struct VarColumn(string COLUMN, TABLE, string TABLE_NAME)
 	if (isTableDefinition!TABLE)
 {
 	alias TableType = TABLE;
@@ -608,13 +613,13 @@ struct CompareExpr(string TABLE_NAME, alias FIELD, CompareOp OP, MATCH...)
 	enum name = __traits(identifier, FIELD);
 	enum op = OP;
 
-	static if (isInstanceOf!(CMPColumn, MATCH[0])) {
+	static if (isInstanceOf!(VarColumn, MATCH[0])) {
 		//pragma(msg, "CMPCOLUMN! "~MatchType.tableName~" "~MatchType.columnName);
 		alias MatchType = MATCH[0];
 		alias ValueTableType = MatchType.TableType;
 		enum valueTableName = MatchType.tableName;
 		enum valueColumnName = MatchType.columnName;
-	} else static if (isInstanceOf!(CMP, MATCH[0])) {
+	} else static if (isInstanceOf!(Var, MATCH[0])) {
 		alias MatchType = MATCH[0];
 		alias ValueTableType = MatchType.TableType;
 		enum valueTableName = MatchType.tableName;
@@ -652,8 +657,8 @@ private template isOperand(T, FIELD)
 {
 	alias FieldComparator = ComparatorType!FIELD;
 	static if (is(T == FieldComparator)) enum isOperand = true;
-	else static if (isInstanceOf!(CMPColumn, T) && is(T.FieldComparator == FieldComparator)) enum isOperand = true;
-	else static if (isInstanceOf!(CMP, T) && is(PrimaryKeyType!(T.TableType) == FieldComparator)) enum isOperand = true;
+	else static if (isInstanceOf!(VarColumn, T) && is(T.FieldComparator == FieldComparator)) enum isOperand = true;
+	else static if (isInstanceOf!(Var, T) && is(PrimaryKeyType!(T.TableType) == FieldComparator)) enum isOperand = true;
 	else enum isOperand = false;
 }
 
@@ -720,7 +725,7 @@ mixin template RowFields(ORM, TABLE, MEMBERS...) {
 	} else static if (MEMBERS.length == 1) {
 		alias T = typeof(__traits(getMember, TABLE, MEMBERS[0]));
 		static if (isTableDefinition!T) {
-			mixin(format(`@property auto %s() { return m_orm.findOne(cmp!T.%s(m_rawData.%s)); }`, MEMBERS[0], primaryKeyOf!T, MEMBERS[0]));
+			mixin(format(`@property auto %s() { return m_orm.findOne(var!T.%s(m_rawData.%s)); }`, MEMBERS[0], primaryKeyOf!T, MEMBERS[0]));
 		} else static if (isDynamicArray!T && !isSomeString!T && !is(T == ubyte[])) {
 			alias E = typeof(T.init[0]);
 			static assert(isTableDefinition!E);
@@ -762,7 +767,7 @@ struct RowArray(ORM, T) {
 
 	private R resolve(E key)
 	{
-		return m_orm.findOne(__traits(getMember, CMP!T, primaryKeyName)(key));
+		return m_orm.findOne(__traits(getMember, Var!T, primaryKeyName)(key));
 	}
 }
 
