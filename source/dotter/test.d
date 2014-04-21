@@ -12,9 +12,9 @@ import dotter.orm;
 import std.algorithm : equal, map;
 
 
-void testDriver(alias CREATE_DRIVER)()
+void testDriver(alias CREATE_DRIVER, CREATE_PARAMS...)(CREATE_PARAMS create_params)
 {
-	auto drv = CREATE_DRIVER!Tables();
+	auto drv = CREATE_DRIVER!Tables(create_params);
 	auto db = createORM(drv);
 
 	db.users.insert(0, "Dummy", 0);

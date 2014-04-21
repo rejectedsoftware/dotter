@@ -103,15 +103,16 @@ class MongoDBDriver(TABLES) {
 
 unittest {
 	import dotter.test;
-	static MongoDatabase db;
+	static auto createDriver(TABLES)(MongoDatabase db) { return new MongoDBDriver!(TABLES)(db); }
+
+	MongoDatabase db;
 	try db = connectMongoDB("localhost").getDatabase("test");
 	catch (Exception e) {
 		import vibe.core.log;
 		logWarn("Failed to connect to local MongoDB server. Skipping test.");
 		return;
 	}
-	static auto createDriver(TABLES)() { return new MongoDBDriver!(TABLES)(db); }
-	testDriver!(createDriver);
+	testDriver!(createDriver)(db);
 }
 
 private mixin template MongoQuery(size_t idx, QUERIES...) {
