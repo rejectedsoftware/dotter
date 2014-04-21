@@ -14,7 +14,9 @@ version (Have_vibe_d):
 import dotter.orm;
 
 import std.traits;
+import std.typetuple;
 import vibe.data.serialization;
+import vibe.db.mongo.mongo;
 
 
 /** ORM driver using MongoDB for data storage and query execution.
@@ -23,11 +25,12 @@ import vibe.data.serialization;
 	serialize query expressions to BSON without unnecessary memory allocations.
 */
 class MongoDBDriver(TABLES) {
-	import vibe.db.mongo.mongo;
+	alias Tables = TABLES;
+	alias TableTypes = TypeTuple!(typeof(TABLES.tupleof));
 
 	private {
 		MongoDatabase m_db;
-		MongoCollection[] m_collections;
+		MongoCollection[TableTypes.length] m_collections;
 	}
 
 	alias DefaultID = BsonObjectID;
@@ -40,13 +43,13 @@ class MongoDBDriver(TABLES) {
 		auto cli = connectMongoDB(url_or_host);
 		m_db = cli.getDatabase(name);
 
-		foreach (tname; __traits(allMembers, TABLES)) {
-			m_collections ~= m_db[tname];
+		foreach (i, tname; __traits(allMembers, TABLES)) {
+			m_collections[i] = m_db[tname];
 			// TODO: setup keys!
 		}
 	}
 	
-	auto find(T, QUERY, TABLES...)(QUERY query)
+	auto find(T, QUERY)(QUERY query)
 	{
 		struct Query { mixin MongoQuery!(0, QUERY); }
 		Query mquery;
@@ -55,7 +58,7 @@ class MongoDBDriver(TABLES) {
 		import vibe.core.log; import vibe.data.bson;
 		//logInfo("QUERY (%s): %s", table.name, serializeToBson(mquery).toString());
 		
-		return table.find(mquery).map!(b => deserializeBson!T(b));
+		return coll!(T.Table).find(mquery).map!(b => deserializeBson!T(b));
 	}
 
 	void update(T, QUERY, UPDATE)(QUERY query, UPDATE update)
@@ -72,12 +75,12 @@ class MongoDBDriver(TABLES) {
 		//logInfo("QUERY (%s): %s", table.name, serializeToBson(mquery).toString());
 		//logInfo("UPDATE: %s", serializeToBson(mupdate).toString());
 
-		table.update(mquery, mupdate);
+		coll!(T.Table).update(mquery, mupdate);
 	}
 
 	void insert(T)(T value)
 	{
-		table.insert(value);
+		coll!(T.Table).insert(value);
 	}
 
 	void updateOrInsert(T, QUERY)(QUERY query, T value)
@@ -87,8 +90,10 @@ class MongoDBDriver(TABLES) {
 
 	void removeAll(TABLE)()
 	{
-		table.remove(Bson.emptyObject);
+		coll!TABLE.remove(Bson.emptyObject);
 	}
+
+	private ref MongoCollection coll(TABLE)() { return m_collections[staticIndexOf!(TABLE, TableTypes)]; }
 }
 
 private mixin template MongoQuery(size_t idx, QUERIES...) {
@@ -107,15 +112,12 @@ private mixin template MongoQuery(size_t idx, QUERIES...) {
 			else static if (Q.op == CompareOp.less) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$lt")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
 			else static if (Q.op == CompareOp.lessEqual) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$lte")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
 			else static assert(false, format("Unsupported compare operator: %s", Q.comp));
-		} else static if (isInstanceOf!(MatchExpr, Q)) {
-			static if (Q.op == CompareOp.all) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$all")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
-			else static assert(false, format("Unsupported match operator: %s", Q.comp));
 		} else static if (isInstanceOf!(ConjunctionExpr, Q)) {
 			//mixin(format(`static struct Q%s { mixin MongoQuery!(0, Q.exprs); } @(vibe.data.serialization.name("$and")) Q%s q%s;`, idx, idx, idx));
 			mixin MongoQuery!(0, typeof(Q.exprs));
 		} else static if (isInstanceOf!(DisjunctionExpr, Q)) {
 			mixin(format(
-				q{static struct Q%s { mixin MongoQueries!(0, typeof(Q.exprs)); } @(vibe.data.serialization.name("$or"), asArray) Q%s q%s;}, idx, idx, idx));
+				q{static struct Q%s { mixin MongoQueries!(0, typeof(Q.exprs)); } @(vibe.data.serialization.name("$or"), vibe.data.serialization.asArray) Q%s q%s;}, idx, idx, idx));
 		} else static assert(false, "Unsupported query expression type: "~Q.stringof);
 	}
 }
@@ -135,12 +137,12 @@ private static string initializeMongoQuery(size_t idx, QUERY)(string name, strin
 	alias Q = QUERY;
 
 	static if (isInstanceOf!(CompareExpr, Q)) {
-		final switch (Q.comp) with (CompareOp) {
+		final switch (Q.op) with (CompareOp) {
 			case equal:
 				ret ~= format("%s.%s = %s.value;", name, Q.name, srcfield);
 				break;
 			case notEqual, greater, greaterEqual, less, lessEqual:
-			case containsAll:
+			case contains:
 				ret ~= format("%s.%s.value = %s.value;", name, Q.name, srcfield);
 				break;
 		}
