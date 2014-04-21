@@ -38,13 +38,13 @@ class InMemoryORMDriver(TABLES) {
 			ubyte[] storage;
 			size_t idCounter;
 		}
-		Table[] m_tables;
+		Table[TableTypes.length] m_tables;
 	}
 
 	this()
 	{
-		foreach (tname; __traits(allMembers, TABLES)) {
-			m_tables ~= Table(tname);
+		foreach (i, tname; __traits(allMembers, TABLES)) {
+			m_tables[i] = Table(tname);
 		}
 	}
 
