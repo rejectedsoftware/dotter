@@ -38,15 +38,20 @@ class MongoDBDriver(TABLES) {
 	alias ColumnHandle = string;
 	enum bool supportsArrays = true;
 
-	this(string url_or_host, string name)
+	this(MongoDatabase db)
 	{
-		auto cli = connectMongoDB(url_or_host);
-		m_db = cli.getDatabase(name);
+		m_db = db;
 
 		foreach (i, tname; __traits(allMembers, TABLES)) {
 			m_collections[i] = m_db[tname];
 			// TODO: setup keys!
 		}
+	}
+
+	this(string url_or_host, string name)
+	{
+		auto cli = connectMongoDB(url_or_host);
+		this(cli.getDatabase(name));
 	}
 	
 	auto find(T, QUERY)(QUERY query)
@@ -96,6 +101,19 @@ class MongoDBDriver(TABLES) {
 	private ref MongoCollection coll(TABLE)() { return m_collections[staticIndexOf!(TABLE, TableTypes)]; }
 }
 
+unittest {
+	import dotter.test;
+	static MongoDatabase db;
+	try db = connectMongoDB("localhost").getDatabase("test");
+	catch (Exception e) {
+		import vibe.core.log;
+		logWarn("Failed to connect to local MongoDB server. Skipping test.");
+		return;
+	}
+	static auto createDriver(TABLES)() { return new MongoDBDriver!(TABLES)(db); }
+	testDriver!(createDriver);
+}
+
 private mixin template MongoQuery(size_t idx, QUERIES...) {
 	static if (QUERIES.length > 1) {
 		mixin MongoQuery!(idx, QUERIES[0 .. $/2]);
@@ -105,19 +123,21 @@ private mixin template MongoQuery(size_t idx, QUERIES...) {
 		alias Q = QUERIES[0];
 
 		static if (isInstanceOf!(CompareExpr, Q)) {
-			static if (Q.op == CompareOp.equal) mixin("Q.V "~Q.name~";");
+			static if (Q.op == CompareOp.equal || Q.op == CompareOp.contains) mixin("Q.V "~Q.name~";");
 			else static if (Q.op == CompareOp.notEqual) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$ne")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
 			else static if (Q.op == CompareOp.greater) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$gt")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
 			else static if (Q.op == CompareOp.greaterEqual) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$gte")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
 			else static if (Q.op == CompareOp.less) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$lt")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
 			else static if (Q.op == CompareOp.lessEqual) mixin(format(`static struct Q%s { @(vibe.data.serialization.name("$lte")) Q.V value; } Q%s %s;`, idx, idx, Q.name));
-			else static assert(false, format("Unsupported compare operator: %s", Q.comp));
+			else static assert(false, format("Unsupported compare operator: %s", Q.op));
 		} else static if (isInstanceOf!(ConjunctionExpr, Q)) {
 			//mixin(format(`static struct Q%s { mixin MongoQuery!(0, Q.exprs); } @(vibe.data.serialization.name("$and")) Q%s q%s;`, idx, idx, idx));
 			mixin MongoQuery!(0, typeof(Q.exprs));
 		} else static if (isInstanceOf!(DisjunctionExpr, Q)) {
 			mixin(format(
 				q{static struct Q%s { mixin MongoQueries!(0, typeof(Q.exprs)); } @(vibe.data.serialization.name("$or"), vibe.data.serialization.asArray) Q%s q%s;}, idx, idx, idx));
+		} else static if (is(Q == QueryAnyExpr)) {
+			// empty query
 		} else static assert(false, "Unsupported query expression type: "~Q.stringof);
 	}
 }
@@ -139,10 +159,11 @@ private static string initializeMongoQuery(size_t idx, QUERY)(string name, strin
 	static if (isInstanceOf!(CompareExpr, Q)) {
 		final switch (Q.op) with (CompareOp) {
 			case equal:
+			case contains:
 				ret ~= format("%s.%s = %s.value;", name, Q.name, srcfield);
 				break;
 			case notEqual, greater, greaterEqual, less, lessEqual:
-			case contains:
+			//case contains:
 				ret ~= format("%s.%s.value = %s.value;", name, Q.name, srcfield);
 				break;
 		}
@@ -153,6 +174,8 @@ private static string initializeMongoQuery(size_t idx, QUERY)(string name, strin
 	} else static if (isInstanceOf!(DisjunctionExpr, Q)) {
 		foreach (i, E; typeof(Q.exprs))
 			ret ~= initializeMongoQuery!(i, E)(format("%s.q%s.q%s", name, idx, i), format("%s.exprs[%s]", srcfield, i));
+	} else static if (is(Q == QueryAnyExpr)) {
+		// nothing to initialize;
 	} else static assert(false, "Unsupported query expression type: "~Q.stringof);
 
 	return ret;
