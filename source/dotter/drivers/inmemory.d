@@ -57,13 +57,14 @@ class InMemoryORMDriver(TABLES) {
 		return MatchRange!(false, T, QUERY, typeof(this))(this, query);
 	}
 
-	void update(T, QUERY, UPDATE)(QUERY query, UPDATE update)
+	void update(T, QUERY, UPDATES...)(QUERY query, UPDATES updates)
 	{
 		auto ptable = &m_tables[staticIndexOf!(T.Table, TableTypes)];
 		auto items = cast(T[])ptable.storage;
 		items = items[0 .. ptable.rowCounter];
 		foreach (ref itm; MatchRange!(true, T, QUERY, typeof(this))(this, query))
-			applyUpdate(itm, update);
+			foreach (i, U; UPDATES)
+				applyUpdate(itm, updates[i]);
 	}
 
 	void insert(T)(T value)
@@ -242,10 +243,12 @@ size_t[] tableIndicesOf(TABLES...)(string[] names)
 {
 	import std.array : startsWith;
 	auto ret = new size_t[names.length];
+	ret[] = size_t.max;
 	foreach (i, T; TABLES)
 		foreach (j, name; names)
 			if (name.startsWith(T.stringof~"."))
 				ret[j] = i;
+	foreach (i, idx; ret) assert(idx != size_t.max, "Unknown table name ("~TABLES.stringof~"): "~names[i]);
 	return ret;
 }
 

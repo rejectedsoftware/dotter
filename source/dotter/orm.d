@@ -341,11 +341,20 @@ auto dummy = q{
 };
 
 
-/** Required attribute to mark a struct as a table definition.
+/**
+	Creates a new ORM instance.
+*/
+ORM!(Driver) createORM(Driver)(Driver driver) { return new ORM!(Driver)(driver); }
+
+
+/**
+	Required attribute to mark a struct as a table definition.
 */
 @property TableDefinitionAttribute tableDefinition() { return TableDefinitionAttribute.init; }
 
-/** Marks the primary key of a table.
+
+/**
+	Marks the primary key of a table.
 
 	Only one column per table may be the primary key. Whenever columns
 	of the type of the table are compared to other columns/values,
@@ -353,17 +362,26 @@ auto dummy = q{
 */
 @property PrimaryKeyAttribute primaryKey() { return PrimaryKeyAttribute.init; }
 
-/** Notes a secondary key of a table.
-*/
 
-/** Marks a column as containing the referenced table rows.
+/**
+	Notes a secondary key of a table.
+
+	Keyed columns are indexed and can be queried efficiently.
+*/
+@property KeyAttribute key() { return KeyAttribute.init; }
+
+
+/**
+	Marks a column as containing the referenced table rows.
 
 	This assumption will be enforced in conjunction with the $(D @ownedBy!T)
 	attribute and by disallowing defining an explicit primary key.
 */
 @property OwnedAttribute owned() { return OwnedAttribute.init; }
 
-/** Sets the owner table for an owned table.
+
+/**
+	Sets the owner table for an owned table.
 
 	This attribute must be present on any table referenced using the
 	$(D @owned) attribute. It enforces that only the owner table
@@ -372,27 +390,26 @@ auto dummy = q{
 */
 @property OwnerByAttribute owner() { return OwnerByAttribute.init; }
 
-/** Hints the database that the order of array elements does not matter.
+
+/**
+	Hints the database that the order of array elements does not matter.
 
 	Array fields with this attribute can be freely reordered by the
 	database for more efficient access.
 */
 @property UnorderedAttribute unordered() { return UnorderedAttribute.init; }
 
-struct TableDefinitionAttribute {}
-struct PrimaryKeyAttribute {}
-struct OwnedAttribute {}
-struct OwnerByAttribute {}
-struct UnorderedAttribute {}
 
+/**
 
-ORM!(Driver) createORM(Driver)(Driver driver) { return new ORM!(Driver)(driver); }
-
+*/
 class ORM(DRIVER) {
 	alias Tables = DRIVER.Tables;
 	alias Driver = DRIVER;
 	alias TableTypes = TypeTuple!(typeof(Tables.tupleof));
 	enum tableNames = [__traits(allMembers, Tables)];
+
+	static assert(TableTypes.length > 0, "Database doesn't contain any tables.");
 
 	private {
 		Driver m_driver;
@@ -464,10 +481,10 @@ class ORM(DRIVER) {
 		return m_driver.findRaw!(RawRow!(Driver, TABLE))(params);
 	}
 
-	void update(QUERY, UPDATE)(QUERY query, UPDATE update)
+	void update(QUERY, UPDATES...)(QUERY query, UPDATES updates)
 	{
 		alias T = QueryTable!QUERY;
-		m_driver.update!(RawRow!(Driver, T), QUERY, UPDATE)(query, update);
+		m_driver.update!(RawRow!(Driver, T), QUERY, UPDATES)(query, updates);
 	}
 
 	void insert(T, FIELDS...)(FIELDS fields)
@@ -509,6 +526,16 @@ class ORM(DRIVER) {
 		return Table!(ORM, tidx)(this);
 	}
 }
+
+struct TableDefinitionAttribute {}
+struct PrimaryKeyAttribute {}
+struct KeyAttribute {}
+struct OwnedAttribute {}
+struct OwnerByAttribute {}
+struct UnorderedAttribute {}
+
+
+
 
 struct Table(ORM, size_t INDEX) {
 	enum tableIndex = INDEX;
@@ -761,6 +788,8 @@ struct SetExpr(alias FIELD)
 /******************************************************************************/
 
 template isValidColumnType(T) {
+	import vibe.data.bson;
+	import std.datetime;
 	static if (isTableDefinition!T) enum isValidColumnType = true;
 	else static if (isDynamicArray!T && isTableDefinition!(typeof(T.init[0]))) enum isValidColumnType = true;
 	else static if (is(T == bool)) enum isValidColumnType = true;
@@ -770,6 +799,9 @@ template isValidColumnType(T) {
 	else static if (is(T == ulong) || is(T == long)) enum isValidColumnType = true;
 	else static if (is(T == float) || is(T == double)) enum isValidColumnType = true;
 	else static if (is(T == string)) enum isValidColumnType = true;
+	else static if (is(T == BsonObjectID)) enum isValidColumnType = true; // hmm
+	else static if (is(T == SysTime)) enum isValidColumnType = true;
+	else static if (is(T == enum)) enum isValidColumnType = true;
 	else enum isValidColumnType = false;
 }
 
