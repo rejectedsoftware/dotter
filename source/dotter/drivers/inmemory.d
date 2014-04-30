@@ -59,25 +59,30 @@ class InMemoryORMDriver(TABLES) {
 
 	void update(T, QUERY, UPDATES...)(QUERY query, UPDATES updates)
 	{
-		auto ptable = &m_tables[staticIndexOf!(T.Table, TableTypes)];
-		auto items = cast(T[])ptable.storage;
+		auto ptable = &m_tables[staticIndexOf!(T, TableTypes)];
+		auto items = cast(MemoryRow!(InMemoryORMDriver, T)[])ptable.storage;
 		items = items[0 .. ptable.rowCounter];
 		foreach (ref itm; MatchRange!(true, T, QUERY, typeof(this))(this, query))
 			foreach (i, U; UPDATES)
 				applyUpdate(itm, updates[i]);
 	}
 
-	void insert(T)(T value)
+	void insert(T)(RawRow!(InMemoryORMDriver, T) value)
 	{
 		import std.algorithm : max;
-		auto ptable = &m_tables[staticIndexOf!(T.Table, TableTypes)];
+		auto ptable = &m_tables[staticIndexOf!(T, TableTypes)];
 		if (ptable.storage.length <= ptable.rowCounter)
 			ptable.storage.length = max(16 * T.sizeof, ptable.storage.length * 2);
-		auto items = cast(T[])ptable.storage;
+		auto items = cast(MemoryRow!(InMemoryORMDriver, T)[])ptable.storage;
 		items[ptable.rowCounter++] = value;
 	}
 
-	void updateOrInsert(T, QUERY)(QUERY query, T value)
+	void updateOrInsert(T, QUERY)(QUERY query, RawRow!(InMemoryORMDriver, T) value)
+	{
+		assert(false);
+	}
+
+	void remove(T, QUERY)(QUERY query)
 	{
 		assert(false);
 	}
@@ -94,13 +99,27 @@ class InMemoryORMDriver(TABLES) {
 		} else static assert(false, "Unsupported update expression type: "~U.stringof);
 	}
 
-	private ref inout(T) getItem(T)(size_t table, size_t item_index)
+	private ref inout(MemoryRow!(InMemoryORMDriver, T)) getMemoryItem(T)(size_t table, size_t item_index)
 	inout {
 		assert(table < m_tables.length, "Table index out of bounds.");
-		auto items = cast(inout(T)[])m_tables[table].storage;
+		auto items = cast(inout(MemoryRow!(InMemoryORMDriver, T))[])m_tables[table].storage;
 		import std.conv;
-		assert(item_index < items.length, "Item index out of bounds for "~T.Table.stringof~" ("~to!string(table)~"): "~to!string(item_index));
+		assert(item_index < items.length, "Item index out of bounds for "~T.stringof~" ("~to!string(table)~"): "~to!string(item_index));
 		return items[item_index];
+	}
+
+	private RawRow!(InMemoryORMDriver, T) getItem(T)(size_t table, size_t item_index)
+	const {
+		auto mrow = getMemoryItem!T(table, item_index);
+
+		RawRow!(InMemoryORMDriver, T) ret;
+		foreach (m; __traits(allMembers, T)) {
+			alias M = typeof(__traits(getMember, T, m));
+			static if (isTableDefinition!M && isOwned!M) {
+
+			}
+		}
+		return ret;
 	}
 }
 
@@ -113,13 +132,13 @@ unittest {
 private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 {
 	alias Tables = DRIVER.TableTypes;
-	enum iterationTables = QueryTables!(T.Table, QUERY);
+	enum iterationTables = QueryTables!(T, QUERY);
 	enum iterationTableIndex = tableIndicesOf!Tables(iterationTables);
 	alias IterationTableTypes = IndexedTypes!(iterationTableIndex, Tables);
 	//pragma(msg, "QUERY: "~QUERY.stringof);
 	//pragma(msg, "ITTABLES: "~IterationTables.stringof);
-	enum resultTableIndex = IndexOf!(T.Table, Tables);
-	enum resultIterationTableIndex = iterationTables.countUntil(T.Table.stringof~".");
+	enum resultTableIndex = IndexOf!(T, Tables);
+	enum resultIterationTableIndex = iterationTables.countUntil(T.stringof~".");
 
 	private {
 		DRIVER m_driver;
@@ -139,12 +158,12 @@ private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 	@property bool empty() const { return m_empty; }
 
 	static if (allow_modfications) {
-		@property ref inout(T) front()
+		@property ref inout(MemoryRow!(DRIVER, T)) front()
 		inout {
-			return m_driver.getItem!T(resultTableIndex, m_cursor[resultIterationTableIndex]);
+			return m_driver.getMemoryItem!T(resultTableIndex, m_cursor[resultIterationTableIndex]);
 		}
 	} else {
-		@property ref const(T) front()
+		@property RawRow!(DRIVER, T) front()
 		const {
 			return m_driver.getItem!T(resultTableIndex, m_cursor[resultIterationTableIndex]);
 		}
@@ -160,14 +179,14 @@ private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 	{
 		while (!empty) {
 			// 
-			RawRows!(DRIVER, IterationTableTypes) values;
+			MemoryRows!(DRIVER, IterationTableTypes) values;
 			foreach (i, T; IterationTableTypes) {
 				// if any affected table is empty, there cannot be a result
 				if (!m_driver.m_tables[iterationTableIndex[i]].rowCounter) {
 					m_empty = true;
 					break;
 				}
-				values[i] = m_driver.getItem!(RawRow!(DRIVER, T))(iterationTableIndex[i], m_cursor[i]);
+				values[i] = m_driver.getMemoryItem!T(iterationTableIndex[i], m_cursor[i]);
 			}
 			//import std.stdio; writefln("TESTING %s %s", m_cursor, iterationTables);
 			//static if (values.length == 4) writefln("%s %s %s %s", values[0], values[1], values[2], values[3]);
@@ -199,10 +218,16 @@ private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 			auto value = query.value;
 		} else {
 			//pragma(msg, "T "~Q.valueTableName~" C "~Q.valueColumnName);
-			alias valuerow = rows[iterationTables.countUntil(Q.valueTableName)];
-			enum string cname = Q.valueColumnName;
-			//pragma(msg, typeof(valuerow).stringof~" OO "~cname ~ " -> "~iterationTables.stringof~" -> "~IterationTableTypes.stringof~" -> "~iterationTableIndex.stringof);
-			auto value = __traits(getMember, valuerow, cname);
+			enum itidx = iterationTables.countUntil(Q.valueTableName);
+			static if (isOwned!(Q.ValueTableType)) {
+				auto value = m_cursor[itidx];
+			} else {
+				pragma(msg, "Not owned: "~Q.ValueTableType.stringof);
+				enum string cname = Q.valueColumnName;
+				alias valuerow = rows[itidx];
+				//pragma(msg, typeof(valuerow).stringof~" OO "~cname ~ " -> "~iterationTables.stringof~" -> "~IterationTableTypes.stringof~" -> "~iterationTableIndex.stringof);
+				auto value = __traits(getMember, valuerow, cname);
+			}
 		}
 		static if (Q.op == CompareOp.equal) return __traits(getMember, item, Q.name) == value;
 		else static if (Q.op == CompareOp.notEqual) return __traits(getMember, item, Q.name) != value;
@@ -257,3 +282,49 @@ template IndexedTypes(alias indices, T...)
 	static if (indices.length == 0) alias IndexedTypes = TypeTuple!();
 	else alias IndexedTypes = TypeTuple!(T[indices[0]], IndexedTypes!(indices[1 .. $], T));
 }
+
+struct MemoryRow(DRIVER, TABLE)
+	if (isTableDefinition!TABLE)
+{
+	alias Table = TABLE;
+	mixin MemoryRowFields!(DRIVER, TABLE, __traits(allMembers, TABLE));
+}
+
+mixin template MemoryRowFields(DRIVER, TABLE, MEMBERS...) {
+	static if (MEMBERS.length > 1) {
+		mixin MemoryRowFields!(DRIVER, TABLE, MEMBERS[0 .. $/2]);
+		mixin MemoryRowFields!(DRIVER, TABLE, MEMBERS[$/2 .. $]);
+	} else static if (MEMBERS.length == 1) {
+		alias T = typeof(__traits(getMember, TABLE, MEMBERS[0]));
+		mixin(format(`MemoryColumnType!(DRIVER, T) %s;`, MEMBERS[0]));
+	}
+}
+
+template MemoryColumnType(DRIVER, T)
+{
+	static if (isTableDefinition!T) { // TODO: support in-document storage of table types for 1 to n relations
+		static if (isOwned!T) alias MemoryColumnType = size_t;
+		else alias MemoryColumnType = PrimaryKeyType!T;
+	} else static if (isDynamicArray!T && !isSomeString!T && !is(T == ubyte[])) {
+		alias E = typeof(T.init[0]);
+		static assert(isTableDefinition!E, format("Array %s.%s may only contain table references, not %s.", TABLE.stringof, MEMBERS[0], E.stringof));
+		static if (!isTableDefinition!E) static assert(false);
+		else static if (DRIVER.supportsArrays) {
+			static if (isOwned!E) alias MemoryColumnType = size_t[];
+			else alias MemoryColumnType = PrimaryKeyType!E[]; // TODO: avoid dyamic allocations!
+		} else {
+			static assert(false, "Arrays for column based databases are not yet supported.");
+		}
+	} else {
+		static assert(!isAssociativeArray!T, "Associative arrays are not supported as column types. Please use a separate table instead.");
+		alias MemoryColumnType = T;
+	}
+}
+
+template MemoryRows(DRIVER, T...)
+{
+	static if (T.length == 1) alias MemoryRows = TypeTuple!(MemoryRow!(DRIVER, T[0]));
+	else static if (T.length == 0) alias MemoryRows = TypeTuple!();
+	else alias MemoryRows = TypeTuple!(MemoryRows!(DRIVER, T[0 .. $/2]), MemoryRows!(DRIVER, T[$/2 .. $]));
+}
+

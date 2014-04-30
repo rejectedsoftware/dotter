@@ -388,7 +388,7 @@ ORM!(Driver) createORM(Driver)(Driver driver) { return new ORM!(Driver)(driver);
 	can have references to the owned table and that there is a strict
 	one to many relationship between owner and ownee.
 */
-@property OwnerByAttribute owner() { return OwnerByAttribute.init; }
+@property OwnedByAttribute!TABLE ownedBy(TABLE)() { return OwnedByAttribute!TABLE.init; }
 
 
 /**
@@ -428,6 +428,12 @@ class ORM(DRIVER) {
 				alias FieldType = typeof(__traits(getMember, Table, f));
 				static assert(isValidColumnType!FieldType, "Unsupported column type for "~tname~"."~f~": "~FieldType.stringof);
 			}
+
+			static if (isOwned!Table) {
+				static assert(!is(typeof(primaryKeyType!Table)), "Owned table "~Table.stringof~" may not have a primary key.");
+			} else {
+				static assert(is(PrimaryKeyType!Table), "Missing primary key for table "~Table.stringof~".");
+			}
 		}
 	}
 
@@ -447,11 +453,11 @@ class ORM(DRIVER) {
 				static assert(QueryTables!QUERY.length == 1, "Query accesses multiple tables, need to specify the result table explicitly.");
 				alias T = QueryTable!QUERY;
 				enum tidx = tableIndex!(T, Tables);
-				return m_driver.find!(RawRow!(Driver, T), QUERY)(query).map!(r => new Row!(ORM, T)(this, r));
+				return m_driver.find!(T, QUERY)(query).map!(r => new Row!(ORM, T)(this, r));
 			} else static if (FIELDS.length == 1 && isTableDefinition!(FIELDS[0])) {
 				alias T = FIELDS[0];
 				enum tidx = tableIndex!(T, Tables);
-				return m_driver.find!(RawRow!(Driver, T), QUERY)(query).map!(r => new Row!(ORM, T)(this, r));
+				return m_driver.find!(T, QUERY)(query).map!(r => new Row!(ORM, T)(this, r));
 			} else {
 				static assert(false, "Selecting individual fields is not yet supported.");
 			}
@@ -462,12 +468,22 @@ class ORM(DRIVER) {
 
 		A Nullable!T is returned and set to null when no match was found.
 	*/
-	Nullable!(Row!(ORM, QueryTable!QUERY)) findOne(QUERY)(QUERY query)
+	template findOne(FIELDS...) {
+		auto findOne(QUERY)(QUERY query)
+		{
+			auto res = find!FIELDS(query); // TODO: give a hint to the DB driver that only one document is desired
+			Nullable!(typeof(res.front)) ret;
+			if (!res.empty) ret = res.front;
+			return ret;
+		}
+	}
+
+	/**
+	*/
+	bool canFind(QUERY)(QUERY query)
 	{
-		auto res = find(query); // TODO: give a hint to the DB driver that only one document is desired
-		Nullable!(Row!(ORM, QueryTable!QUERY)) ret;
-		if (!res.empty) ret = res.front;
-		return ret;
+		// TODO: avoid transferring an actual object from the DB
+		return !findOne(query).isNull();
 	}
 
 	/** Driver specific version of find.
@@ -478,17 +494,17 @@ class ORM(DRIVER) {
 	*/
 	auto findRaw(TABLE, T...)(T params)
 	{
-		return m_driver.findRaw!(RawRow!(Driver, TABLE))(params);
+		return m_driver.findRaw!(TABLE)(params);
 	}
 
 	void update(QUERY, UPDATES...)(QUERY query, UPDATES updates)
 	{
 		alias T = QueryTable!QUERY;
-		m_driver.update!(RawRow!(Driver, T), QUERY, UPDATES)(query, updates);
+		m_driver.update!(T, QUERY, UPDATES)(query, updates);
 	}
 
 	void insert(T, FIELDS...)(FIELDS fields)
-		if (isTableDefinition!T)
+		if (isTableDefinition!T && !isOwned!T)
 	{
 		RawRow!(Driver, T) value;
 		// TODO: translate references to other tables automatically
@@ -502,6 +518,12 @@ class ORM(DRIVER) {
 	{
 
 	}*/
+
+	void remove(T = QueryTable!QUERY, QUERY)(QUERY query)
+		if (isTableDefinition!T)
+	{
+		m_driver.remove!T(query);
+	}
 
 	void removeAll(T)()
 		if (isTableDefinition!T)
@@ -531,7 +553,7 @@ struct TableDefinitionAttribute {}
 struct PrimaryKeyAttribute {}
 struct KeyAttribute {}
 struct OwnedAttribute {}
-struct OwnerByAttribute {}
+struct OwnedByAttribute(TABLE) { alias Table = TABLE; }
 struct UnorderedAttribute {}
 
 
@@ -654,7 +676,6 @@ struct VarColumn(string COLUMN, TABLE, string TABLE_NAME)
 	enum columnName = COLUMN;
 
 	alias Field = typeof(__traits(getMember, TableType, columnName));
-	alias FieldComparator = ComparatorType!Field;
 
 	static opCall(OP)(OP operand) if(isOperand!(OP, Field)) { return equal(operand); }
 	static auto equal(OP)(OP operand) if(isOperand!(OP, Field)) { return compare!(CompareOp.equal)(operand); }
@@ -668,7 +689,7 @@ struct VarColumn(string COLUMN, TABLE, string TABLE_NAME)
 		if(isOperand!(OP, Field))
 	{
 		CompareExpr!(tableName, __traits(getMember, TableType, columnName), comp, OP) ret;
-		static if (is(OP == FieldComparator)) ret.value = operand;
+		static if (__traits(compiles, ComparatorType!Field) && is(OP == ComparatorType!Field)) ret.value = operand;
 		return ret;
 	}
 
@@ -705,7 +726,6 @@ struct CompareExpr(string TABLE_NAME, alias FIELD, CompareOp OP, MATCH...)
 	alias TABLE = TypeTuple!(__traits(parent, FIELD))[0];
 	enum tableName = TABLE_NAME;
 	alias T = typeof(FIELD);
-	alias V = ComparatorType!T;
 	enum name = __traits(identifier, FIELD);
 	enum op = OP;
 
@@ -719,8 +739,10 @@ struct CompareExpr(string TABLE_NAME, alias FIELD, CompareOp OP, MATCH...)
 		alias MatchType = MATCH[0];
 		alias ValueTableType = MatchType.TableType;
 		enum valueTableName = MatchType.tableName;
-		enum valueColumnName = primaryKeyOf!ValueTableType;
+		static if (!isOwned!ValueTableType)
+			enum valueColumnName = primaryKeyOf!ValueTableType;
 	} else {
+		alias V = ComparatorType!T;
 		//pragma(msg, "T: "~MATCH[0].stringof);
 		V value;
 	}
@@ -760,11 +782,18 @@ struct QueryAnyExpr {} // dummy expression to match anything
 
 private template isOperand(T, FIELD)
 {
-	alias FieldComparator = ComparatorType!FIELD;
-	static if (is(T : FieldComparator)) enum isOperand = true;
-	else static if (isInstanceOf!(VarColumn, T) && is(T.FieldComparator == FieldComparator)) enum isOperand = true;
-	else static if (isInstanceOf!(Var, T) && is(PrimaryKeyType!(T.TableType) == FieldComparator)) enum isOperand = true;
-	else enum isOperand = false;
+	static assert(!isTableDefinition!T, "Missing var! prefix for operand "~T.stringof);
+	static if (isInstanceOf!(VarColumn, T) && is(T.Field == FIELD)) enum isOperand = true;
+	else static if (isInstanceOf!(VarColumn, T) && isArray!FIELD && is(T.Field == typeof(FIELD.init[0]))) enum isOperand = true;
+	else static if (isInstanceOf!(Var, T) && is(T.TableType == FIELD)) enum isOperand = true;
+	else static if (isInstanceOf!(Var, T) && isArray!FIELD && is(T.TableType == typeof(FIELD.init[0]))) enum isOperand = true;
+	else {
+		alias FieldComparator = ComparatorType!FIELD;
+		static if (is(T : FieldComparator)) enum isOperand = true;
+		else static if (isInstanceOf!(VarColumn, T) && is(T.FieldComparator == FieldComparator)) enum isOperand = true;
+		else static if (isInstanceOf!(Var, T) && is(PrimaryKeyType!(T.TableType) == FieldComparator)) enum isOperand = true;
+		else enum isOperand = false;
+	}
 }
 
 
@@ -821,7 +850,7 @@ class Row(ORM, TABLE)
 		m_rawData = data;
 	}
 
-	@property ref const(RawRow!(ORM.Driver, TABLE)) rawRowData() const { return m_rawData; }
+	@property ref const(RawRow!(ORM.Driver, TABLE)) rawData() const { return m_rawData; }
 
 	auto toTuple() { return tuple(m_rawData.tupleof); }
 
@@ -854,9 +883,13 @@ mixin template RowFields(ORM, TABLE, MEMBERS...) {
 
 struct RowArray(ORM, T) {
 	private {
-		alias E = PrimaryKeyType!T;
 		alias R = Row!(ORM, T);
-		enum primaryKeyName = primaryKeyOf!T;
+		static if (!isOwned!T) {
+			alias E = PrimaryKeyType!T;
+			enum primaryKeyName = primaryKeyOf!T;
+		} else {
+			alias E = RawRow!(ORM.Driver, T);
+		}
 		ORM m_orm;
 		const(E)[] m_items;
 	}
@@ -867,6 +900,8 @@ struct RowArray(ORM, T) {
 		m_items = items;
 	}
 
+	@property size_t length() const { return m_items.length; }
+
 	R opIndex(size_t idx) { return resolve(m_items[idx]); }
 
 	auto opSlice()
@@ -875,9 +910,28 @@ struct RowArray(ORM, T) {
 		return m_items.map!(itm => resolve(itm));
 	}
 
-	private R resolve(E key)
+	int opApply(scope int delegate(ref R) del)
 	{
-		return m_orm.findOne(__traits(getMember, Var!T, primaryKeyName)(key));
+		foreach (ref e; m_items) {
+			auto item = resolve(e);
+			if (auto ret = del(item)) return ret;
+		}
+		return 0;
+	}
+
+	int opApply(scope int delegate(ref size_t idx, ref R) del)
+	{
+		foreach (idx, ref e; m_items) {
+			auto item = resolve(e);
+			if (auto ret = del(idx, item)) return ret;
+		}
+		return 0;
+	}
+
+	private R resolve(in E key)
+	{
+		static if (isOwned!T) return new R(m_orm, key);
+		else return m_orm.findOne(__traits(getMember, Var!T, primaryKeyName)(key));
 	}
 }
 
@@ -886,6 +940,18 @@ struct RawRow(DRIVER, TABLE)
 	if (isTableDefinition!TABLE)
 {
 	alias Table = TABLE;
+
+	@property RawRow dup()
+	const {
+		RawRow ret = void;
+		foreach (fname; __traits(allMembers, Table)) {
+			alias FT = typeof(__traits(getMember, Table, fname));
+			static if (isDynamicArray!FT || isAssociativeArray!FT) __traits(getMember, ret, fname) = __traits(getMember, this, fname).dup;
+			else __traits(getMember, ret, fname) = __traits(getMember, this, fname);
+		}
+		return ret;
+	}
+
 	mixin RawRowFields!(DRIVER, TABLE, __traits(allMembers, TABLE));
 }
 
@@ -902,13 +968,15 @@ mixin template RawRowFields(DRIVER, TABLE, MEMBERS...) {
 template RawColumnType(DRIVER, T)
 {
 	static if (isTableDefinition!T) { // TODO: support in-document storage of table types for 1 to n relations
-		alias RawColumnType = PrimaryKeyType!T;
+		static if (isOwned!T) alias RawColumnType = RawRow!(DRIVER, T);
+		else alias RawColumnType = PrimaryKeyType!T;
 	} else static if (isDynamicArray!T && !isSomeString!T && !is(T == ubyte[])) {
 		alias E = typeof(T.init[0]);
 		static assert(isTableDefinition!E, format("Array %s.%s may only contain table references, not %s.", TABLE.stringof, MEMBERS[0], E.stringof));
 		static if (!isTableDefinition!E) static assert(false);
 		else static if (DRIVER.supportsArrays) {
-			alias RawColumnType = PrimaryKeyType!E[]; // TODO: avoid dyamic allocations!
+			static if (isOwned!E) alias RawColumnType = RawRow!(DRIVER, E)[];
+			else alias RawColumnType = PrimaryKeyType!E[]; // TODO: avoid dyamic allocations!
 		} else {
 			static assert(false, "Arrays for column based databases are not yet supported.");
 		}
@@ -934,6 +1002,7 @@ template isPrimaryKey(T, string key) { enum isPrimaryKey = findFirstUDA!(Primary
 @property string primaryKeyOf(T)()
 	if (isTableDefinition!T)
 {
+	static assert(!isOwned!T, "Cannot get the primary key of an owned table.");
 	// TODO: produce better error messages for duplicate or missing primary keys!
 	foreach (m; __traits(allMembers, T))
 		static if (isPrimaryKey!(T, m))
@@ -941,7 +1010,12 @@ template isPrimaryKey(T, string key) { enum isPrimaryKey = findFirstUDA!(Primary
 	assert(false, "No primary key for "~T.stringof);
 }
 
-template PrimaryKeyType(T) if (isTableDefinition!T) { enum string key = primaryKeyOf!T; alias PrimaryKeyType = typeof(__traits(getMember, T, key)); }
+template PrimaryKeyType(T)
+	if (isTableDefinition!T)
+{
+	enum string key = primaryKeyOf!T;
+	alias PrimaryKeyType = typeof(__traits(getMember, T, key));
+}
 
 
 private template QueryTable(QUERIES...) if (QUERIES.length > 0) {
@@ -949,7 +1023,7 @@ private template QueryTable(QUERIES...) if (QUERIES.length > 0) {
 		alias Q = QUERIES[0];
 		static if (isInstanceOf!(ConjunctionExpr, Q) || isInstanceOf!(DisjunctionExpr, Q)) {
 			alias QueryTable = QueryTable!(typeof(Q.exprs));
-		} else static if (isInstanceOf!(CompareExpr, Q) || isInstanceOf!(MatchExpr, Q)) {
+		} else static if (isInstanceOf!(CompareExpr, Q)) {
 			alias QueryTable = Q.TABLE;
 		} else static assert(false, "Invalid query type: "~Q.stringof);
 	} else {
@@ -965,7 +1039,7 @@ template QueryTables(QUERIES...) if (QUERIES.length > 0) {
 		alias Q = QUERIES[0];
 		static if (isInstanceOf!(ConjunctionExpr, Q) || isInstanceOf!(DisjunctionExpr, Q)) {
 			enum QueryTables = QueryTables!(typeof(Q.exprs));
-		} else static if (isInstanceOf!(CompareExpr, Q)/* || isInstanceOf!(MatchExpr, Q)*/) {
+		} else static if (isInstanceOf!(CompareExpr, Q)) {
 			enum QueryTables = [Q.tableName];
 		} else static if (isTableDefinition!Q) {
 			enum QueryTables = [Q.stringof~"."];
@@ -990,4 +1064,12 @@ private template tableIndex(TABLE, TABLES)
 		else enum impl = impl!(idx+1, MEMBERS);
 	}
 	enum tableIndex = impl!(0, __traits(allMembers, TABLES));
+}
+
+@property bool isOwned(TABLE)()
+{
+	foreach (A; __traits(getAttributes, TABLE))
+		if (isInstanceOf!(OwnedByAttribute, typeof(A)))
+			return true;
+	return false;
 }
