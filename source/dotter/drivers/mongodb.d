@@ -63,7 +63,7 @@ class MongoDBDriver(TABLES) {
 		import vibe.core.log; import vibe.data.bson;
 		//logInfo("QUERY (%s): %s", table.name, serializeToBson(mquery).toString());
 		
-		return coll!(T.Table).find(mquery).map!(b => deserializeBson!T(b));
+		return coll!T.find(mquery).map!(b => deserializeBson!(RawRow!(MongoDBDriver, T))(b));
 	}
 
 	void update(T, QUERY, UPDATE)(QUERY query, UPDATE update)
@@ -80,7 +80,7 @@ class MongoDBDriver(TABLES) {
 		//logInfo("QUERY (%s): %s", table.name, serializeToBson(mquery).toString());
 		//logInfo("UPDATE: %s", serializeToBson(mupdate).toString());
 
-		coll!(T.Table).update(mquery, mupdate);
+		coll!T.update(mquery, mupdate);
 	}
 
 	void insert(T)(T value)
@@ -167,6 +167,7 @@ private static string initializeMongoQuery(size_t idx, QUERY)(string name, strin
 			//case contains:
 				ret ~= format("%s.%s.value = %s.value;", name, Q.name, srcfield);
 				break;
+			case anyOf: assert(false, "TODO!");
 		}
 	} else static if (isInstanceOf!(ConjunctionExpr, Q)) {
 		foreach (i, E; typeof(Q.exprs))

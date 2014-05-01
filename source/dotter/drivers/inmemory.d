@@ -69,12 +69,7 @@ class InMemoryORMDriver(TABLES) {
 
 	void insert(T)(RawRow!(InMemoryORMDriver, T) value)
 	{
-		import std.algorithm : max;
-		auto ptable = &m_tables[staticIndexOf!(T, TableTypes)];
-		if (ptable.storage.length <= ptable.rowCounter)
-			ptable.storage.length = max(16 * T.sizeof, ptable.storage.length * 2);
-		auto items = cast(MemoryRow!(InMemoryORMDriver, T)[])ptable.storage;
-		items[ptable.rowCounter++] = value;
+		addRawItem(value);
 	}
 
 	void updateOrInsert(T, QUERY)(QUERY query, RawRow!(InMemoryORMDriver, T) value)
@@ -92,11 +87,35 @@ class InMemoryORMDriver(TABLES) {
 		m_tables[staticIndexOf!(T, TableTypes)].rowCounter = 0;
 	}
 
-	private static void applyUpdate(T, U)(ref T item, ref U query)
+	private void applyUpdate(T, U)(ref T item, ref U query)
 	{
 		static if (isInstanceOf!(SetExpr, U)) {
 			__traits(getMember, item, U.name) = query.value;
+		} else static if (isInstanceOf!(PushExpr, U)) {
+			foreach (v; query.values) {
+				auto idx = addRawItem(v);
+				__traits(getMember, item, U.fieldName) ~= idx;
+			}
+		} else static if (isInstanceOf!(PullExpr, U)) {
+			foreach (v; query.values) {
+				//auto idx = addRawItem(v);
+				assert(false);
+			}
 		} else static assert(false, "Unsupported update expression type: "~U.stringof);
+	}
+
+	private size_t addRawItem(T)(RawRow!(InMemoryORMDriver, T) value)
+	{
+		import std.algorithm : max;
+		alias MRow = MemoryRow!(InMemoryORMDriver, T);
+		auto ptable = &m_tables[staticIndexOf!(T, TableTypes)];
+		if (ptable.storage.length / MRow.sizeof <= ptable.rowCounter)
+			ptable.storage.length = max(16 * MRow.sizeof, ptable.storage.length * 2);
+		auto idx = ptable.rowCounter++;
+		auto mval = toMemoryRow(value);
+		auto items = cast(MRow[])ptable.storage;
+		items[idx] = toMemoryRow(value);
+		return idx;
 	}
 
 	private ref inout(MemoryRow!(InMemoryORMDriver, T)) getMemoryItem(T)(size_t table, size_t item_index)
@@ -116,7 +135,31 @@ class InMemoryORMDriver(TABLES) {
 		foreach (m; __traits(allMembers, T)) {
 			alias M = typeof(__traits(getMember, T, m));
 			static if (isTableDefinition!M && isOwned!M) {
+				__traits(getMember, ret, m) = getItem(staticIndexOf!(M, TableTypes), __traits(getMember, mrow, m));
+			} else static if (isDynamicArray!M && !isSomeString!M) {
+				__traits(getMember, ret, m) = __traits(getMember, mrow, m).dup;
+			} else {
+				__traits(getMember, ret, m) = __traits(getMember, mrow, m);
+			}
+		}
+		return ret;
+	}
 
+	private MemoryRow!(InMemoryORMDriver, T) toMemoryRow(T)(RawRow!(InMemoryORMDriver, T) row)
+	{
+		MemoryRow!(InMemoryORMDriver, T) ret;
+		foreach (f; __traits(allMembers, T)) {
+			alias FT = typeof(__traits(getMember, T, f));
+			static if (isTableDefinition!FT && isOwned!FT) {
+				auto idx = addRawItem(__traits(getMember, row, f));
+				__traits(getMember, ret, f) = idx;
+			} else static if (isDynamicArray!FT && isTableDefinition!(typeof(FT.init[0])) && isOwned!(typeof(FT.init[0]))) {
+				foreach (itm; __traits(getMember, row, f)) {
+					auto idx = addRawItem(itm);
+					__traits(getMember, ret, f) ~= idx;
+				}
+			} else {
+				__traits(getMember, ret, f) = __traits(getMember, row, f);
 			}
 		}
 		return ret;
@@ -236,6 +279,7 @@ private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 		else static if (Q.op == CompareOp.less) return __traits(getMember, item, Q.name) < value;
 		else static if (Q.op == CompareOp.lessEqual) return __traits(getMember, item, Q.name) <= value;
 		else static if (Q.op == CompareOp.contains) return __traits(getMember, item, Q.name).canFind(value);
+		else static if (Q.op == CompareOp.anyOf) return value.canFind(__traits(getMember, item, Q.name));
 		else static assert(false, format("Unsupported comparator: %s", Q.op));
 	}
 
