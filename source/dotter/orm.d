@@ -296,7 +296,7 @@ unittest {
 		.map!(g => g.name).equal(["sellers"]));
 
 	// determine all users in group "drivers"
-	assert(db.find!User(var!Group.name("drivers") & var!Group.members.contains(var!GroupMember) & var!GroupMember.user(var!User.name))
+	assert(db.find!User(var!Group.name("drivers") & var!Group.members.contains(var!GroupMember) & var!GroupMember.user(var!User))
 		.map!(u => u.name).equal(["Peter", "Tom"]));
 
 	// find co-workers of Linda using named variables
@@ -305,7 +305,7 @@ unittest {
 			var!Group.members.contains(var!m1) &
 			var!Group.members.contains(var!m2) &
 			var!m1.user("Linda") &
-			var!m2.user(var!User.name) &
+			var!m2.user(var!User) &
 			var!User.name.notEqual("Linda"))
 		.map!(u => u.name).equal(["Peter"]));
 
@@ -483,7 +483,9 @@ class ORM(DRIVER) {
 	bool canFind(QUERY)(QUERY query)
 	{
 		// TODO: avoid transferring an actual object from the DB
-		return !findOne(query).isNull();
+		alias DummyTable = AnyQueryTable!QUERY;
+		static assert(isTableDefinition!DummyTable);
+		return !findOne!DummyTable(query).isNull();
 	}
 
 	/** Driver specific version of find.
@@ -497,19 +499,26 @@ class ORM(DRIVER) {
 		return m_driver.findRaw!(TABLE)(params);
 	}
 
-	void update(QUERY, UPDATES...)(QUERY query, UPDATES updates)
-	{
-		alias T = QueryTable!QUERY;
-		m_driver.update!(T, QUERY, UPDATES)(query, updates);
+	template update(T...) if (T.length <= 1) {
+		void update(QUERY, UPDATES...)(QUERY query, UPDATES updates)
+		{
+			static if (T.length == 0) alias Table = QueryTable!QUERY;
+			else alias Table = T[0];
+			m_driver.update!(Table, QUERY, UPDATES)(query, updates);
+		}
 	}
 
 	void insert(T, FIELDS...)(FIELDS fields)
-		if (isTableDefinition!T && !isOwned!T)
+		if (isTableDefinition!T)
 	{
-		RawRow!(Driver, T) value;
-		// TODO: translate references to other tables automatically
-		value.tupleof = fields;
-		m_driver.insert(value);
+		static assert(!isOwned!T, "Use update(..., add!"~T.stringof~"(...)) to add owned table entries.");
+		static if (FIELDS.length == 1 && is(FIELDS[0] == RawRow!(Driver, T))) m_driver.insert(fields[0]);
+		else {
+			RawRow!(Driver, T) value;
+			// TODO: translate references to other tables automatically
+			value.tupleof = fields;
+			m_driver.insert(value);
+		}
 	}
 
 	/*void updateOrInsert(QUERY query)(QUERY query, QueryTable)
@@ -572,6 +581,7 @@ struct Table(ORM, size_t INDEX) {
 
 	auto find(QUERY)(QUERY query) { return m_db.find!TableType(query); }
 	auto find()() { return m_db.find!TableType(QueryAnyExpr.init); }
+	void update(QUERY, UPDATE)(QUERY query, UPDATE update) { return m_db.update!TableType(query, update); } 
 	void insert(FIELDS...)(FIELDS fields) { m_db.insert!TableType(fields); }
 	void removeAll() { m_db.removeAll!TableType(); }
 }
@@ -684,6 +694,11 @@ struct VarColumn(string COLUMN, TABLE, string TABLE_NAME)
 	static auto greaterEqual(OP)(OP operand) if(isOperand!(OP, Field)) { return compare!(CompareOp.greaterEqual)(operand); }
 	static auto less(OP)(OP operand) if(isOperand!(OP, Field)) { return compare!(CompareOp.less)(operand); }
 	static auto lessEqual(OP)(OP operand) if(isOperand!(OP, Field)) { return compare!(CompareOp.lessEqual)(operand); }
+	static auto anyOf(OPS...)(OPS operands) {
+		CompareExpr!(tableName, __traits(getMember, TableType, columnName), CompareOp.anyOf, OPS) ret;
+		ret.value = operands;
+		return ret;
+	}
 
 	static auto compare(CompareOp comp, OP)(OP operand)
 		if(isOperand!(OP, Field))
@@ -721,7 +736,7 @@ auto and(EXPRS...)(EXPRS exprs) { return ConjunctionExpr!EXPRS(exprs); }
 auto or(EXPRS...)(EXPRS exprs) { return DisjunctionExpr!EXPRS(exprs); }
 
 struct CompareExpr(string TABLE_NAME, alias FIELD, CompareOp OP, MATCH...)
-	if (MATCH.length == 1)
+	//if (MATCH.length == 1)
 {
 	alias TABLE = TypeTuple!(__traits(parent, FIELD))[0];
 	enum tableName = TABLE_NAME;
@@ -742,9 +757,13 @@ struct CompareExpr(string TABLE_NAME, alias FIELD, CompareOp OP, MATCH...)
 		static if (!isOwned!ValueTableType)
 			enum valueColumnName = primaryKeyOf!ValueTableType;
 	} else {
-		alias V = ComparatorType!T;
-		//pragma(msg, "T: "~MATCH[0].stringof);
-		V value;
+		static if (OP == CompareOp.anyOf) {
+			MATCH value;
+		} else {
+			alias V = ComparatorType!T;
+			//pragma(msg, "T: "~MATCH[0].stringof);
+			V value;
+		}
 	}
 
 	auto opBinaryRight(string op, T)(T other) if(op == "|")
@@ -766,7 +785,8 @@ enum CompareOp {
 	greaterEqual,
 	less,
 	lessEqual,
-	contains
+	contains,
+	anyOf
 }
 
 template ComparatorType(T)
@@ -809,6 +829,50 @@ struct SetExpr(alias FIELD)
 	alias TABLE = TypeTuple!(__traits(parent, FIELD))[0];
 	enum name = __traits(identifier, FIELD);
 	T value;
+}
+
+template push(TABLE) if (isTableDefinition!TABLE) {
+	mixin fields!(0, __traits(allMembers, TABLE));
+	mixin template fields(size_t idx, fnames...) {
+		static if (idx < fnames.length) {
+			enum fname = fnames[idx];
+			alias FT = typeof(__traits(getMember, TABLE, fname));
+			static if (isDynamicArray!FT && isTableDefinition!(typeof(FT.init[0]))) {
+				mixin("auto "~fname~"(ARGS...)(ARGS values) { return PushExpr!(TABLE, fname, ARGS)(values); }");
+			}
+			mixin fields!(idx+1, fnames);
+		}
+	}
+}
+
+struct PushExpr(TABLE, string FIELD, VALUES...)
+{
+	alias TableType = TABLE;
+	enum fieldName = FIELD;
+	alias FieldType = typeof(__traits(getMember, TABLE, fieldName));
+	VALUES values;
+}
+
+template pull(TABLE) if (isTableDefinition!TABLE) {
+	mixin fields!(0, __traits(allMembers, TABLE));
+	mixin template fields(size_t idx, fnames...) {
+		static if (idx < fnames.length) {
+			enum fname = fnames[idx];
+			alias FT = typeof(__traits(getMember, TABLE, fname));
+			static if (isDynamicArray!FT && isTableDefinition!(typeof(FT.init[0]))) {
+				mixin("auto "~fname~"(ARGS...)(ARGS values) { return PullExpr!(TABLE, fname, ARGS)(values); }");
+			}
+			mixin fields!(idx+1, fnames);
+		}
+	}
+}
+
+struct PullExpr(TABLE, string FIELD, VALUES...)
+{
+	alias TableType = TABLE;
+	enum fieldName = FIELD;
+	alias FieldType = typeof(__traits(getMember, TABLE, fieldName));
+	VALUES values;
 }
 
 
@@ -1031,6 +1095,21 @@ private template QueryTable(QUERIES...) if (QUERIES.length > 0) {
 		alias T2 = QueryTable!(QUERIES[$/2 .. $]);
 		static assert(is(T1 == T2), "Query references different tables: "~T1.stringof~" and "~T2.stringof);
 		alias QueryTable = T1;
+	}
+}
+
+private template AnyQueryTable(QUERIES...) if (QUERIES.length > 0) {
+	static if (QUERIES.length == 1) {
+		alias Q = QUERIES[0];
+		static if (isInstanceOf!(ConjunctionExpr, Q) || isInstanceOf!(DisjunctionExpr, Q)) {
+			alias AnyQueryTable = AnyQueryTable!(typeof(Q.exprs));
+		} else static if (isInstanceOf!(CompareExpr, Q)) {
+			alias AnyQueryTable = Q.TABLE;
+		} else static assert(false, "Invalid query type: "~Q.stringof);
+	} else {
+		alias T1 = AnyQueryTable!(QUERIES[0 .. $/2]);
+		alias T2 = AnyQueryTable!(QUERIES[$/2 .. $]);
+		alias AnyQueryTable = T1;
 	}
 }
 
