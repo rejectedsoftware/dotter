@@ -1,10 +1,10 @@
 {
 	"fileVersion": 1,
 	"versions": {
-		"vibe-d": "0.7.19",
 		"libevent": "~master",
+		"vibe-d": "0.7.20-alpha.1+commit.65.gbea1ac0",
 		"openssl": "~master",
 		"libev": "~master",
-		"mysql-native": "0.0.13"
+		"mysql-native": "0.0.14"
 	}
 }
