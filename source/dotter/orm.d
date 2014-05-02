@@ -68,7 +68,7 @@ unittest {
 		tuple(4, "Peter", 69)
 	]));
 
-	db.update(var!User.name("Tom"), set!(User.age)(20));
+	db.update(var!User.name("Tom"), set!User.age(20));
 
 	assert(db.find(var!User.name("Tom")).map!(r => r.toTuple).equal([
 		tuple(0, "Tom", 20)
@@ -821,14 +821,27 @@ private template isOperand(T, FIELD)
 /* UPDATE EXPRESSIONS                                                         */
 /******************************************************************************/
 
-auto set(alias field)(typeof(field) value) { return SetExpr!(field)(value); }
+template set(TABLE) if (isTableDefinition!TABLE) {
+	mixin fields!(0, __traits(allMembers, TABLE));
+	mixin template fields(size_t idx, fnames...) {
+		static if (idx < fnames.length) {
+			enum fname = fnames[idx];
+			alias FT = typeof(__traits(getMember, TABLE, fname));
+			//static if (isDynamicArray!FT && isTableDefinition!(typeof(FT.init[0]))) {
+				mixin("auto "~fname~"(ARG)(ARG value) { return SetExpr!(TABLE, fname)(value); }");
+			//}
+			mixin fields!(idx+1, fnames);
+		}
+	}
+}
 
-struct SetExpr(alias FIELD)
+struct SetExpr(TABLE, string FIELD)
 {
-	alias T = typeof(FIELD);
-	alias TABLE = TypeTuple!(__traits(parent, FIELD))[0];
-	enum name = __traits(identifier, FIELD);
-	T value;
+	alias TableType = TABLE;
+	enum fieldName = FIELD;
+	alias FieldType = typeof(__traits(getMember, TableType, fieldName));
+	alias ValueType = FieldType;// RawColumnType!(void, FieldType); // FIXME
+	ValueType value;
 }
 
 template push(TABLE) if (isTableDefinition!TABLE) {

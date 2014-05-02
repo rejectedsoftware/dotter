@@ -191,7 +191,7 @@ private mixin template MongoUpdate(size_t idx, UPDATES...) {
 		alias Q = UPDATES[0];
 
 		static if (isInstanceOf!(SetExpr, Q)) {
-			mixin(format(q{static struct Q%s { Q.T %s; } @(vibe.data.serialization.name("$set")) Q%s q%s;}, idx, Q.name, idx, idx));
+			mixin(format(q{static struct Q%s { Q.ValueType %s; } @(vibe.data.serialization.name("$set")) Q%s q%s;}, idx, Q.fieldName, idx, idx));
 		} else static assert(false, "Unsupported update expression type: "~Q.stringof);
 	}
 }
@@ -211,7 +211,7 @@ private static string initializeMongoUpdate(size_t idx, UPDATE)(string name, str
 	alias Q = UPDATE;
 
 	static if (isInstanceOf!(SetExpr, Q)) {
-		ret ~= format("%s.q%s.%s = %s.value;", name, idx, Q.name, srcfield);
+		ret ~= format("%s.q%s.%s = %s.value;", name, idx, Q.fieldName, srcfield);
 	} else static assert(false, "Unsupported update expression type: "~Q.stringof);
 
 	return ret;
