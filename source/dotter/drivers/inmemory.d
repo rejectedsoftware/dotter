@@ -149,9 +149,10 @@ class InMemoryORMDriver(TABLES) {
 			static if (isTableDefinition!M && isOwned!M) {
 				__traits(getMember, ret, m) = getItem(staticIndexOf!(M, TableTypes), __traits(getMember, mrow, m));
 			} else static if (isArray!M && isTableDefinition!(typeof(M.init[0])) && isOwned!(typeof(M.init[0]))) {
+				alias MTable = typeof(M.init[0]);
 				__traits(getMember, ret, m).length = __traits(getMember, mrow, m).length;
 				foreach (i, ref dst; __traits(getMember, ret, m))
-					dst = getItem!(typeof(M.init[0]))(staticIndexOf!(M, TableTypes), __traits(getMember, mrow, m)[i]);
+					dst = getItem!MTable(staticIndexOf!(MTable, TableTypes), __traits(getMember, mrow, m)[i]);
 			} else static if (isDynamicArray!M && !isSomeString!M) {
 				__traits(getMember, ret, m) = __traits(getMember, mrow, m).dup;
 			} else {
