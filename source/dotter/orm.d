@@ -512,16 +512,16 @@ class ORM(DRIVER) {
 		if (isTableDefinition!T)
 	{
 		static assert(!isOwned!T, "Use update(..., add!"~T.stringof~"(...)) to add owned table entries.");
-		static if (FIELDS.length == 1 && is(FIELDS[0] == RawRow!(Driver, T))) m_driver.insert(fields[0]);
+		static if (FIELDS.length == 1 && is(FIELDS[0] == RawRow!T)) m_driver.insert(fields[0]);
 		else {
-			RawRow!(Driver, T) value;
+			RawRow!T value;
 			// TODO: translate references to other tables automatically
 			value.tupleof = fields;
 			m_driver.insert(value);
 		}
 	}
 
-	void updateOrInsert(QUERY, UPDATE)(QUERY query, UPDATE update)
+	void updateOrInsert(QUERY, UPDATES...)(QUERY query, UPDATES updates)
 	{
 		assert(false);
 	}
@@ -916,16 +916,16 @@ class Row(ORM, TABLE)
 
 	private {
 		ORM m_orm;
-		const(RawRow!(ORM.Driver, TABLE)) m_rawData;
+		const(RawRow!TABLE) m_rawData;
 	}
 
-	this(ORM orm, in RawRow!(ORM.Driver, TABLE) data)
+	this(ORM orm, in RawRow!TABLE data)
 	{
 		m_orm = orm;
 		m_rawData = data;
 	}
 
-	@property ref const(RawRow!(ORM.Driver, TABLE)) rawData() const { return m_rawData; }
+	@property ref const(RawRow!TABLE) rawData() const { return m_rawData; }
 
 	auto toTuple() { return tuple(m_rawData.tupleof); }
 
@@ -963,7 +963,7 @@ struct RowArray(ORM, T) {
 			alias E = PrimaryKeyType!T;
 			enum primaryKeyName = primaryKeyOf!T;
 		} else {
-			alias E = RawRow!(ORM.Driver, T);
+			alias E = RawRow!T;
 		}
 		ORM m_orm;
 		const(E)[] m_items;
@@ -1011,7 +1011,7 @@ struct RowArray(ORM, T) {
 }
 
 
-struct RawRow(DRIVER, TABLE)
+struct RawRow(TABLE)
 	if (isTableDefinition!TABLE)
 {
 	alias Table = TABLE;
@@ -1035,45 +1035,41 @@ struct RawRow(DRIVER, TABLE)
 		return ret;
 	}
 
-	mixin RawRowFields!(DRIVER, TABLE, __traits(allMembers, TABLE));
+	mixin RawRowFields!(TABLE, __traits(allMembers, TABLE));
 }
 
-mixin template RawRowFields(DRIVER, TABLE, MEMBERS...) {
+mixin template RawRowFields(TABLE, MEMBERS...) {
 	static if (MEMBERS.length > 1) {
-		mixin RawRowFields!(DRIVER, TABLE, MEMBERS[0 .. $/2]);
-		mixin RawRowFields!(DRIVER, TABLE, MEMBERS[$/2 .. $]);
+		mixin RawRowFields!(TABLE, MEMBERS[0 .. $/2]);
+		mixin RawRowFields!(TABLE, MEMBERS[$/2 .. $]);
 	} else static if (MEMBERS.length == 1) {
 		alias T = typeof(__traits(getMember, TABLE, MEMBERS[0]));
-		mixin(format(`RawColumnType!(DRIVER, T) %s;`, MEMBERS[0]));
+		mixin(format(`RawColumnType!T %s;`, MEMBERS[0]));
 	}
 }
 
-template RawColumnType(DRIVER, T)
+template RawColumnType(T)
 {
 	static if (isTableDefinition!T) { // TODO: support in-document storage of table types for 1 to n relations
-		static if (isOwned!T) alias RawColumnType = RawRow!(DRIVER, T);
+		static if (isOwned!T) alias RawColumnType = RawRow!T;
 		else alias RawColumnType = PrimaryKeyType!T;
 	} else static if (isDynamicArray!T && !isSomeString!T && !is(T == ubyte[])) {
 		alias E = typeof(T.init[0]);
 		static assert(isTableDefinition!E, format("Array %s.%s may only contain table references, not %s.", TABLE.stringof, MEMBERS[0], E.stringof));
 		static if (!isTableDefinition!E) static assert(false);
-		else static if (DRIVER.supportsArrays) {
-			static if (isOwned!E) alias RawColumnType = RawRow!(DRIVER, E)[];
-			else alias RawColumnType = PrimaryKeyType!E[]; // TODO: avoid dyamic allocations!
-		} else {
-			static assert(false, "Arrays for column based databases are not yet supported.");
-		}
+		static if (isOwned!E) alias RawColumnType = RawRow!E[];
+		else alias RawColumnType = PrimaryKeyType!E[]; // TODO: avoid dyamic allocations!
 	} else {
 		static assert(!isAssociativeArray!T, "Associative arrays are not supported as column types. Please use a separate table instead.");
 		alias RawColumnType = T;
 	}
 }
 
-template RawRows(DRIVER, T...)
+template RawRows(T...)
 {
-	static if (T.length == 1) alias RawRows = TypeTuple!(RawRow!(DRIVER, T[0]));
+	static if (T.length == 1) alias RawRows = TypeTuple!(RawRow!(T[0]));
 	else static if (T.length == 0) alias RawRows = TypeTuple!();
-	else alias RawRows = TypeTuple!(RawRows!(DRIVER, T[0 .. $/2]), RawRows!(DRIVER, T[$/2 .. $]));
+	else alias RawRows = TypeTuple!(RawRows!(T[0 .. $/2]), RawRows!(T[$/2 .. $]));
 }
 
 template isTableDefinition(T) {

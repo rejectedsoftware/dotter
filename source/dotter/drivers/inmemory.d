@@ -67,12 +67,12 @@ class InMemoryORMDriver(TABLES) {
 				applyUpdate(itm, updates[i]);
 	}
 
-	void insert(T)(RawRow!(InMemoryORMDriver, T) value)
+	void insert(T)(RawRow!T value)
 	{
 		addRawItem(value);
 	}
 
-	void updateOrInsert(T, QUERY)(QUERY query, RawRow!(InMemoryORMDriver, T) value)
+	void updateOrInsert(T, QUERY)(QUERY query, RawRow!T value)
 	{
 		assert(false);
 	}
@@ -104,7 +104,7 @@ class InMemoryORMDriver(TABLES) {
 		} else static assert(false, "Unsupported update expression type: "~U.stringof);
 	}
 
-	private size_t addRawItem(T)(RawRow!(InMemoryORMDriver, T) value)
+	private size_t addRawItem(T)(RawRow!T value)
 	{
 		import std.algorithm : max;
 		alias MRow = MemoryRow!(InMemoryORMDriver, T);
@@ -127,11 +127,11 @@ class InMemoryORMDriver(TABLES) {
 		return items[item_index];
 	}
 
-	private RawRow!(InMemoryORMDriver, T) getItem(T)(size_t table, size_t item_index)
+	private RawRow!T getItem(T)(size_t table, size_t item_index)
 	const {
 		auto mrow = getMemoryItem!T(table, item_index);
 
-		RawRow!(InMemoryORMDriver, T) ret;
+		RawRow!T ret;
 		foreach (m; __traits(allMembers, T)) {
 			alias M = typeof(__traits(getMember, T, m));
 			static if (isTableDefinition!M && isOwned!M) {
@@ -149,7 +149,7 @@ class InMemoryORMDriver(TABLES) {
 		return ret;
 	}
 
-	private MemoryRow!(InMemoryORMDriver, T) toMemoryRow(T)(RawRow!(InMemoryORMDriver, T) row)
+	private MemoryRow!(InMemoryORMDriver, T) toMemoryRow(T)(RawRow!T row)
 	{
 		MemoryRow!(InMemoryORMDriver, T) ret;
 		foreach (f; __traits(allMembers, T)) {
@@ -210,7 +210,7 @@ private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 			return m_driver.getMemoryItem!T(resultTableIndex, m_cursor[resultIterationTableIndex]);
 		}
 	} else {
-		@property RawRow!(DRIVER, T) front()
+		@property RawRow!T front()
 		const {
 			return m_driver.getItem!T(resultTableIndex, m_cursor[resultIterationTableIndex]);
 		}

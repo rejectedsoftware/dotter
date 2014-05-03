@@ -63,7 +63,7 @@ class MongoDBDriver(TABLES) {
 		import vibe.core.log; import vibe.data.bson;
 		//logInfo("QUERY (%s): %s", table.name, serializeToBson(mquery).toString());
 		
-		return coll!T.find(mquery).map!(b => deserializeBson!(RawRow!(MongoDBDriver, T))(b));
+		return coll!T.find(mquery).map!(b => deserializeBson!(RawRow!T)(b));
 	}
 
 	void update(T, QUERY, UPDATE)(QUERY query, UPDATE update)
