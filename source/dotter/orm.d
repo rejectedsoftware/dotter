@@ -1023,7 +1023,15 @@ struct RawRow(DRIVER, TABLE)
 		RawRow ret = void;
 		foreach (fname; __traits(allMembers, Table)) {
 			alias FT = typeof(__traits(getMember, Table, fname));
-			static if (isDynamicArray!FT || isAssociativeArray!FT) __traits(getMember, ret, fname) = __traits(getMember, this, fname).dup;
+			static if (!isSomeString!FT && isDynamicArray!FT || isAssociativeArray!FT) {
+				static if (is(typeof(__traits(getMember, this, fname)[0].dup))) {
+					__traits(getMember, ret, fname).length = __traits(getMember, this, fname).length;
+					foreach (i, ref d; __traits(getMember, ret, fname))
+						d = __traits(getMember, this, fname)[i].dup;
+				} else {
+					__traits(getMember, ret, fname) = __traits(getMember, this, fname).dup;
+				}
+			}
 			else __traits(getMember, ret, fname) = __traits(getMember, this, fname);
 		}
 		return ret;
