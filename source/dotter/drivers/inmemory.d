@@ -72,9 +72,20 @@ class InMemoryORMDriver(TABLES) {
 		addRawItem(value);
 	}
 
-	void updateOrInsert(T, QUERY)(QUERY query, RawRow!T value)
+	void updateOrInsert(T, QUERY, UPDATES...)(QUERY query, UPDATES updates)
 	{
-		assert(false);
+		auto ptable = &m_tables[staticIndexOf!(T, TableTypes)];
+		auto items = cast(MemoryRow!(InMemoryORMDriver, T)[])ptable.storage;
+		items = items[0 .. ptable.rowCounter];
+		bool found = false;
+		foreach (ref itm; MatchRange!(true, T, QUERY, typeof(this))(this, query))
+			foreach (i, U; UPDATES) {
+				applyUpdate(itm, updates[i]);
+				found = true;
+			}
+
+		assert(updates.length == 1 && is(UPDATES[0] == RawRow!T));
+		if (!found) insert(updates[0]);
 	}
 
 	void remove(T, QUERY)(QUERY query)
@@ -89,7 +100,8 @@ class InMemoryORMDriver(TABLES) {
 
 	private void applyUpdate(T, U)(ref T item, ref U query)
 	{
-		static if (isInstanceOf!(SetExpr, U)) {
+		static if (is(U == RawRow!(T.Table))) item = toMemoryRow(query);
+		else static if (isInstanceOf!(SetExpr, U)) {
 			__traits(getMember, item, U.fieldName) = query.value;
 		} else static if (isInstanceOf!(PushExpr, U)) {
 			foreach (v; query.values) {

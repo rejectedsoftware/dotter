@@ -521,9 +521,13 @@ class ORM(DRIVER) {
 		}
 	}
 
-	void updateOrInsert(QUERY, UPDATES...)(QUERY query, UPDATES updates)
-	{
-		assert(false);
+	template updateOrInsert(T...) if (T.length <= 1) {
+		void updateOrInsert(QUERY, UPDATES...)(QUERY query, UPDATES updates)
+		{
+			static if (T.length == 0) alias Table = QueryTable!QUERY;
+			else alias Table = T[0];
+			m_driver.updateOrInsert!(Table, QUERY, UPDATES)(query, updates);
+		}
 	}
 
 	void remove(T = QueryTable!QUERY, QUERY)(QUERY query)
@@ -580,6 +584,7 @@ struct Table(ORM, size_t INDEX) {
 	auto find(QUERY)(QUERY query) { return m_db.find!TableType(query); }
 	auto find()() { return m_db.find!TableType(QueryAnyExpr.init); }
 	void update(QUERY, UPDATE)(QUERY query, UPDATE update) { return m_db.update!TableType(query, update); } 
+	void updateOrInsert(QUERY, UPDATE)(QUERY query, UPDATE update) { return m_db.updateOrInsert!TableType(query, update); } 
 	void insert(FIELDS...)(FIELDS fields) { m_db.insert!TableType(fields); }
 	void removeAll() { m_db.removeAll!TableType(); }
 }
