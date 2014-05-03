@@ -231,7 +231,7 @@ private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 				// if any affected table is empty, there cannot be a result
 				if (!m_driver.m_tables[iterationTableIndex[i]].rowCounter) {
 					m_empty = true;
-					break;
+					return;
 				}
 				values[i] = m_driver.getMemoryItem!T(iterationTableIndex[i], m_cursor[i]);
 			}
