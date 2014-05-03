@@ -521,12 +521,10 @@ class ORM(DRIVER) {
 		}
 	}
 
-	/*void updateOrInsert(QUERY query)(QUERY query, QueryTable)
-
-	void remove(QUERY query)
+	void updateOrInsert(QUERY, UPDATE)(QUERY query, UPDATE update)
 	{
-
-	}*/
+		assert(false);
+	}
 
 	void remove(T = QueryTable!QUERY, QUERY)(QUERY query)
 		if (isTableDefinition!T)
