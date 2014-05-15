@@ -21,6 +21,7 @@ import std.string : format;
 import std.traits;
 import std.typetuple;
 import std.typecons : Nullable, tuple;
+import vibe.data.serialization;
 
 
 /// Simple example of defining tables and inserting/querying/updating rows.
@@ -533,12 +534,14 @@ class ORM(DRIVER) {
 	void remove(T = QueryTable!QUERY, QUERY)(QUERY query)
 		if (isTableDefinition!T)
 	{
+		static assert(!isOwned!T, "Owned tables cannot be directly manipulated. Use push/pull updates instead.");
 		m_driver.remove!T(query);
 	}
 
 	void removeAll(T)()
 		if (isTableDefinition!T)
 	{
+		static assert(!isOwned!T, "Owned tables cannot be directly manipulated. Use push/pull updates instead.");
 		m_driver.removeAll!T();
 	}
 
@@ -911,7 +914,32 @@ template isValidColumnType(T) {
 	else static if (is(T == BsonObjectID)) enum isValidColumnType = true; // hmm
 	else static if (is(T == SysTime)) enum isValidColumnType = true;
 	else static if (is(T == enum)) enum isValidColumnType = true;
+	else static if (isCustomSerializable!T) enum isValidColumnType = isValidColumnType!(typeof(T.init.toSerializedValue()));
+	else static if (isStringSerializable!T || isISOExtStringSerializable!T) enum isValidColumnType = true;
 	else enum isValidColumnType = false;
+}
+
+template StoredType(T)
+{
+	static if (isCustomSerializable!T) alias StoredType = typeof(T.init.toSerializedValue());
+	else static if (isStringSerializable!T || isISOExtStringSerializable!T) alias StoredType = string;
+	else alias StoredType = T;
+}
+
+StoredType!T toStoredType(T)(T value)
+{
+	static if (isCustomSerializable!T) return value.toSerializedValue();
+	else static if (isISOExtStringSerializable!T) return value.toISOExtString();
+	else static if (isStringSerializable!T) return value.toString();
+	else return value;
+}
+
+T fromStoredType(T)(StoredType!T value)
+{
+	static if (isCustomSerializable!T) return T.fromSerializedValue(value);
+	else static if (isISOExtStringSerializable!T) return T.fromISOExtString(value);
+	else static if (isStringSerializable!T) return T.fromString(value);
+	else return value;
 }
 
 class Row(ORM, TABLE)

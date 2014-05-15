@@ -102,7 +102,8 @@ class InMemoryORMDriver(TABLES) {
 	{
 		static if (is(U == RawRow!(T.Table))) item = toMemoryRow(query);
 		else static if (isInstanceOf!(SetExpr, U)) {
-			__traits(getMember, item, U.fieldName) = query.value;
+			static if (isTableDefinition!(U.FieldType)) __traits(getMember, item, U.fieldName) = query.value;
+			else __traits(getMember, item, U.fieldName) = toStoredType(query.value);
 		} else static if (isInstanceOf!(PushExpr, U)) {
 			foreach (v; query.values) {
 				auto idx = addRawItem(v);
@@ -156,7 +157,7 @@ class InMemoryORMDriver(TABLES) {
 			} else static if (isDynamicArray!M && !isSomeString!M) {
 				__traits(getMember, ret, m) = __traits(getMember, mrow, m).dup;
 			} else {
-				__traits(getMember, ret, m) = __traits(getMember, mrow, m);
+				__traits(getMember, ret, m) = fromStoredType!(RawColumnType!M)(__traits(getMember, mrow, m));
 			}
 		}
 		return ret;
@@ -176,7 +177,7 @@ class InMemoryORMDriver(TABLES) {
 					__traits(getMember, ret, f) ~= idx;
 				}
 			} else {
-				__traits(getMember, ret, f) = __traits(getMember, row, f);
+				__traits(getMember, ret, f) = toStoredType(__traits(getMember, row, f));
 			}
 		}
 		return ret;
@@ -289,14 +290,16 @@ private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 				auto value = __traits(getMember, valuerow, cname);
 			}
 		}
-		static if (Q.op == CompareOp.equal) return __traits(getMember, item, Q.name) == value;
-		else static if (Q.op == CompareOp.notEqual) return __traits(getMember, item, Q.name) != value;
-		else static if (Q.op == CompareOp.greater) return __traits(getMember, item, Q.name) > value;
-		else static if (Q.op == CompareOp.greaterEqual) return __traits(getMember, item, Q.name) >= value;
-		else static if (Q.op == CompareOp.less) return __traits(getMember, item, Q.name) < value;
-		else static if (Q.op == CompareOp.lessEqual) return __traits(getMember, item, Q.name) <= value;
-		else static if (Q.op == CompareOp.contains) return __traits(getMember, item, Q.name).canFind(value);
-		else static if (Q.op == CompareOp.anyOf) return value.canFind(__traits(getMember, item, Q.name));
+		auto field = __traits(getMember, item, Q.name);
+
+		static if (Q.op == CompareOp.equal) return field == toStoredType(value);
+		else static if (Q.op == CompareOp.notEqual) return field != toStoredType(value);
+		else static if (Q.op == CompareOp.greater) return field > toStoredType(value);
+		else static if (Q.op == CompareOp.greaterEqual) return field >= toStoredType(value);
+		else static if (Q.op == CompareOp.less) return field < toStoredType(value);
+		else static if (Q.op == CompareOp.lessEqual) return field <= toStoredType(value);
+		else static if (Q.op == CompareOp.contains) return field.canFind(toStoredType(value));
+		else static if (Q.op == CompareOp.anyOf) return value.map!(v => toStoredType(v)).canFind(field);
 		else static assert(false, format("Unsupported comparator: %s", Q.op));
 	}
 
@@ -365,20 +368,20 @@ template MemoryColumnType(DRIVER, T)
 {
 	static if (isTableDefinition!T) { // TODO: support in-document storage of table types for 1 to n relations
 		static if (isOwned!T) alias MemoryColumnType = size_t;
-		else alias MemoryColumnType = PrimaryKeyType!T;
+		else alias MemoryColumnType = StoredType!(PrimaryKeyType!T);
 	} else static if (isDynamicArray!T && !isSomeString!T && !is(T == ubyte[])) {
 		alias E = typeof(T.init[0]);
 		static assert(isTableDefinition!E, format("Array %s.%s may only contain table references, not %s.", TABLE.stringof, MEMBERS[0], E.stringof));
 		static if (!isTableDefinition!E) static assert(false);
 		else static if (DRIVER.supportsArrays) {
 			static if (isOwned!E) alias MemoryColumnType = size_t[];
-			else alias MemoryColumnType = PrimaryKeyType!E[]; // TODO: avoid dyamic allocations!
+			else alias MemoryColumnType = StoredType!(PrimaryKeyType!E)[]; // TODO: avoid dyamic allocations!
 		} else {
 			static assert(false, "Arrays for column based databases are not yet supported.");
 		}
 	} else {
 		static assert(!isAssociativeArray!T, "Associative arrays are not supported as column types. Please use a separate table instead.");
-		alias MemoryColumnType = T;
+		alias MemoryColumnType = StoredType!T;
 	}
 }
 
