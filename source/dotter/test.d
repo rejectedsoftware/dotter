@@ -17,72 +17,73 @@ void testDriver(alias CREATE_DRIVER, CREATE_PARAMS...)(CREATE_PARAMS create_para
 	auto drv = CREATE_DRIVER!Tables(create_params);
 	auto db = createORM(drv);
 
-	db.users.insert(0, "Dummy", 0);
+	db.users.insert(0, "Dummy", 0, null);
 	db.users.removeAll();
 	assert(db.users.find().map!(u => u.toTuple()).empty);
 
-	db.users.insert(0, "Peter", 21);
-	db.users.insert(1, "Stacy", 33);
-	db.users.insert(2, "Tom", 45);
-	db.users.insert(3, "Linda", 28);
-	db.users.insert(4, "Jack", 19);
-	db.users.insert(5, "Russel", 52);
-	db.users.insert(6, "Hans", 64);
-	db.users.insert(7, "Peter", 42);
+	db.users.insert(0, "Peter", 21, [1, 2]);
+	db.users.insert(1, "Stacy", 33, [3]);
+	db.users.insert(2, "Tom", 45, [3, 4]);
+	db.users.insert(3, "Linda", 28, null);
+	db.users.insert(4, "Jack", 19, [3]);
+	db.users.insert(5, "Russel", 52, [3, 4]);
+	db.users.insert(6, "Hans", 64, null);
+	db.users.insert(7, "Peter", 42, [6]);
 
 	assert(db.users.find().map!(u => u.toTuple()).equal([
-		tuple(0, "Peter", 21),
-		tuple(1, "Stacy", 33),
-		tuple(2, "Tom", 45),
-		tuple(3, "Linda", 28),
-		tuple(4, "Jack", 19),
-		tuple(5, "Russel", 52),
-		tuple(6, "Hans", 64),
-		tuple(7, "Peter", 42)
+		tuple(0, "Peter", 21, [1, 2]),
+		tuple(1, "Stacy", 33, [3]),
+		tuple(2, "Tom", 45, [3, 4]),
+		tuple(3, "Linda", 28, cast(int[])[]),
+		tuple(4, "Jack", 19, [3]),
+		tuple(5, "Russel", 52, [3, 4]),
+		tuple(6, "Hans", 64, cast(int[])[]),
+		tuple(7, "Peter", 42, [6])
 	]));
 
-	db.groupMembers.removeAll();
-	assert(db.groupMembers.find().map!(gm => gm.toTuple()).empty);
-
-	db.groupMembers.insert(0, 1, "admin");
-	db.groupMembers.insert(1, 1, "member");
-	db.groupMembers.insert(2, 0, "member");
-	db.groupMembers.insert(3, 2, "member");
-	db.groupMembers.insert(4, 3, "admin");
-	db.groupMembers.insert(5, 4, "member");
-	db.groupMembers.insert(6, 3, "admin");
-	db.groupMembers.insert(7, 4, "member");
-	db.groupMembers.insert(8, 5, "member");
-	db.groupMembers.insert(9, 6, "member");
-	db.groupMembers.insert(10, 7, "member");
-	db.groupMembers.insert(11, 7, "member");
-
-	assert(db.groupMembers.find().map!(gm => gm.toTuple()).equal([
-		tuple(0, 1, "admin"),
-		tuple(1, 1, "member"),
-		tuple(2, 0, "member"),
-		tuple(3, 2, "member"),
-		tuple(4, 3, "admin"),
-		tuple(5, 4, "member"),
-		tuple(6, 3, "admin"),
-		tuple(7, 4, "member"),
-		tuple(8, 5, "member"),
-		tuple(9, 6, "member"),
-		tuple(10, 7, "member"),
-		tuple(11, 7, "member")
-	]));
+	static assert(!__traits(compiles, db.groupMembers.removeAll()));
 
 	db.groups.removeAll();
 	assert(db.groups.find().map!(g => g.toTuple()).empty);
 
-	db.groups.insert("computer", [0, 2, 3, 8]);
-	db.groups.insert("stitching", [1, 4, 5, 9]);
-	db.groups.insert("cooking", [6, 7, 10, 11]);
+	db.groups.insert("computer", [
+		RawRow!GroupMember(1, "admin"),
+		RawRow!GroupMember(0, "member"),
+		RawRow!GroupMember(2, "member"),
+		RawRow!GroupMember(4, "member"),
+	]);
+	db.groups.insert("stitching", [
+		RawRow!GroupMember(1, "member"),
+		RawRow!GroupMember(3, "admin"),
+		RawRow!GroupMember(4, "member"),
+		RawRow!GroupMember(6, "member"),
+	]);
+	db.groups.insert("cooking", [
+		RawRow!GroupMember(3, "admin"),
+		RawRow!GroupMember(4, "member"),
+		RawRow!GroupMember(6, "member"),
+		RawRow!GroupMember(7, "member"),
+	]);
 
 	assert(db.groups.find().map!(g => g.toTuple()).equal([
-		tuple("computer", [0, 2, 3, 8]),
-		tuple("stitching", [1, 4, 5, 9]),
-		tuple("cooking", [6, 7, 10, 11])
+		tuple("computer", [
+			RawRow!GroupMember(1, "admin"),
+			RawRow!GroupMember(0, "member"),
+			RawRow!GroupMember(2, "member"),
+			RawRow!GroupMember(4, "member"),
+		]),
+		tuple("stitching", [
+			RawRow!GroupMember(1, "member"),
+			RawRow!GroupMember(3, "admin"),
+			RawRow!GroupMember(4, "member"),
+			RawRow!GroupMember(6, "member"),
+		]),
+		tuple("cooking", [
+			RawRow!GroupMember(3, "admin"),
+			RawRow!GroupMember(4, "member"),
+			RawRow!GroupMember(6, "member"),
+			RawRow!GroupMember(7, "member"),
+		]),
 	]));
 
 	//
@@ -99,7 +100,21 @@ void testDriver(alias CREATE_DRIVER, CREATE_PARAMS...)(CREATE_PARAMS create_para
 	//
 	// basic contains query
 	//
-	assert(db.find(var!Group.members.contains(1)).map!(g => g.name).equal(["stitching"]));
+	assert(db.find(var!User.friends.contains(4)).map!(u => u.name).equal(["Tom", "Russel"]));
+
+	//
+	// basic updates
+	//
+	db.update(var!User.id(2), set!User.name("Thomas"));
+	assert(db.find(var!User.name("Tom")).empty);
+	assert(db.findOne(var!User.name("Thomas")).id == 2);
+
+	//db.update(var!Group.id(2), )
+
+	//
+	// owned contains query
+	//	
+	//assert(db.groups.find(var!Group.members.contains(var!GroupMember) & var!GroupMember.user(6)).map!(g => g.name).equal(["stitching", "cooking"]));
 }
 
 @tableDefinition
@@ -107,17 +122,17 @@ struct User {
 	@primaryKey int id;
 	string name;
 	int age;
+	@unordered User[] friends;
 }
 
 @tableDefinition
 struct Group {
 	@primaryKey string name;
-	@owned GroupMember[] members;
+	@owned @unordered GroupMember[] members;
 }
 
-@tableDefinition
+@tableDefinition @ownedBy!Group
 struct GroupMember {
-	@primaryKey int id;
 	User user;
 	string role;
 }
