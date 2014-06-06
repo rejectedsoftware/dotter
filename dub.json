@@ -4,7 +4,7 @@
 	"copyright": "Copyright © 2014, rejectedsoftware e.K.",
 	"authors": ["Sönke Ludwig"],
 	"dependencies": {
-		"vibe-d": {"version": "~>0.7.20-rc.1", "optional": true},
+		"vibe-d": "~>0.7.20-rc.1",
 		"mysql-native": {"version": "~>0.0.12", "optional": true},
 		"cassandra-d": {"version": "~>0.0.1", "optional": true}
 	}
