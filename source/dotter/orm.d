@@ -41,8 +41,7 @@ unittest {
 		User users;
 	}
 
-	import dotter.drivers.mongodb; auto dbdriver = new MongoDBDriver!Tables("127.0.0.1", "test");
-	//auto dbdriver = new InMemoryORMDriver!Tables;
+	auto dbdriver = new InMemoryORMDriver!Tables;
 
 	auto db = createORM(dbdriver);
 	db.users.removeAll();
@@ -402,6 +401,15 @@ ORM!(Driver) createORM(Driver)(Driver driver) { return new ORM!(Driver)(driver);
 
 
 /**
+	Hints the database to create an index for a certain column.
+
+	The primary key is already implicitly indexed. Queries must always
+	involve at least one indexed column.
+*/
+@property IndexedAttribute indexed() { return IndexedAttribute.init; }
+
+
+/**
 
 */
 class ORM(DRIVER) {
@@ -569,6 +577,7 @@ struct KeyAttribute {}
 struct OwnedAttribute {}
 struct OwnedByAttribute(TABLE) { alias Table = TABLE; }
 struct UnorderedAttribute {}
+struct IndexedAttribute {}
 
 
 
@@ -1200,3 +1209,5 @@ private template tableIndex(TABLE, TABLES)
 			return true;
 	return false;
 }
+
+enum isColumnIndexed(TABLE, string column) = findFirstUDA!(IndexedAttribute, __traits(getMember, TABLE, column)).found;
