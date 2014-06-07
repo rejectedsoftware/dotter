@@ -3,6 +3,11 @@
 
 	Note that this module requires the vibe-d dependency to be present.
 
+	Status:
+		Supports simple "equals" queries and secondary indices. Doesn't do any
+		attempts at automatic denormalization and thus is strongly tied to the
+		table design due to Cassandra's very specific storage model.
+
 	Copyright: © 2014 rejectedsoftware e.K.
 	License: Subject to the terms of the MIT license, as written in the included LICENSE.txt file.
 	Authors: Sönke Ludwig
@@ -54,7 +59,7 @@ class CassandraDriver(TABLES) {
 		foreach (i, tname; __traits(allMembers, TABLES)) {
 			alias TABLE = typeof(__traits(getMember, TABLES, tname));
 			static if (!isOwned!TABLE) {
-				try m_tables[i] = m_keyspace.createTable!(CassandraRow!TABLE)(TABLE.stringof, primaryKey(primaryKeyOf!TABLE));
+				try m_tables[i] = m_keyspace.createTable!(CassandraRow!TABLE)(TABLE.stringof, cassandra.keyspace.PrimaryKeyAttribute([primaryKeyOf!TABLE]));
 				catch (Exception) m_tables[i] = m_keyspace.getTable(TABLE.stringof);
 				foreach (f; __traits(allMembers, TABLE))
 					static if (isColumnIndexed!(TABLE, f))
@@ -73,7 +78,7 @@ class CassandraDriver(TABLES) {
 					enum name = T.stringof ~ "_" ~ f;
 					assert(name == fieldTableNames[i]);
 					static if (isOwned!FTT) {
-						try m_tables[i] = m_keyspace.createTable!(CassandraRow!(FTT, PrimaryKeyType!T))(name, primaryKey("owner"));
+						try m_tables[i] = m_keyspace.createTable!(CassandraRow!(FTT, PrimaryKeyType!T))(name, cassandra.keyspace.PrimaryKeyAttribute(["owner"]));
 						catch (Exception) m_fieldTables[i] = m_keyspace.getTable(name);
 					} else {
 						import std.string : toLower;
@@ -83,7 +88,7 @@ class CassandraDriver(TABLES) {
 							/*@name(ownerName)*/ PrimaryKeyType!T owner;
 							/*@name(owneeName)*/ PrimaryKeyType!FTT ownee;
 						}
-						try m_tables[i] = m_keyspace.createTable!Relation(name, primaryKey("owner"));
+						try m_tables[i] = m_keyspace.createTable!Relation(name, cassandra.keyspace.PrimaryKeyAttribute(["owner"]));
 						catch (Exception) m_fieldTables[i] = m_keyspace.getTable(name);
 					}
 					i++;
@@ -272,7 +277,7 @@ unittest {
 	CassandraKeyspace db;
 	try db = client.getKeyspace("test");
 	catch (Exception) db = client.createKeyspace("test");
-	testDriver!(createDriver)(db);
+	testDriver!(createDriver)(TestFlags.basic, db);
 }
 
 

@@ -3,6 +3,10 @@
 
 	Note that this module requires the vibe-d dependency to be present.
 
+	Status:
+		Supports all kinds of single-table queries, but doesn't create
+		indices yet.
+
 	Copyright: © 2014 rejectedsoftware e.K.
 	License: Subject to the terms of the MIT license, as written in the included LICENSE.txt file.
 	Authors: Sönke Ludwig
@@ -112,7 +116,7 @@ unittest {
 		logWarn("Failed to connect to local MongoDB server. Skipping test.");
 		return;
 	}
-	testDriver!(createDriver)(db);
+	testDriver!(createDriver)(TestFlags.full, db);
 }
 
 private mixin template MongoQuery(size_t idx, QUERIES...) {

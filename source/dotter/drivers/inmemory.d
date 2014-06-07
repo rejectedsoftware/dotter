@@ -1,6 +1,10 @@
 /**
 	Memory based mapping driver.
 
+	Status:
+		Supports all operations and table joins, but doesn't use any kind of
+		indexes internally, so that queries on large data sets are slow.
+
 	Copyright: © 2014 rejectedsoftware e.K.
 	License: Subject to the terms of the MIT license, as written in the included LICENSE.txt file.
 	Authors: Sönke Ludwig
@@ -187,7 +191,7 @@ class InMemoryORMDriver(TABLES) {
 unittest {
 	import dotter.test;
 	static auto createDriver(TABLES)() { return new InMemoryORMDriver!(TABLES)(); }
-	testDriver!(createDriver);
+	testDriver!(createDriver)(TestFlags.full);
 }
 
 private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)

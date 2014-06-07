@@ -1,6 +1,9 @@
 /**
 	MySQL based mapping driver.
 
+	Status:
+		This driver is not implemented, yet.
+
 	Copyright: © 2014 rejectedsoftware e.K.
 	License: Subject to the terms of the MIT license, as written in the included LICENSE.txt file.
 	Authors: Sönke Ludwig

@@ -11,8 +11,15 @@ import dotter.orm;
 
 import std.algorithm : equal, map;
 
+enum TestFlags {
+	basic = 0, // includes insert/remove/equals queries
+	relationalCompare = 1<<0, // < > <= != >=
+	containsCompare = 1<<1, // "contains" queries
+	basicUpdates = 1<<2, // "set" field updates
+	full = basic|relationalCompare|containsCompare|basicUpdates
+}
 
-void testDriver(alias CREATE_DRIVER, CREATE_PARAMS...)(CREATE_PARAMS create_params)
+void testDriver(alias CREATE_DRIVER, CREATE_PARAMS...)(TestFlags flags, CREATE_PARAMS create_params)
 {
 	auto drv = CREATE_DRIVER!Tables(create_params);
 	auto db = createORM(drv);
@@ -91,23 +98,33 @@ void testDriver(alias CREATE_DRIVER, CREATE_PARAMS...)(CREATE_PARAMS create_para
 	//
 	assert(db.find(var!User.name("Peter")).map!(u => u.id).setEqual([0, 7]));
 	assert(db.find(var!User.name.equal("Peter")).map!(u => u.id).setEqual([0, 7]));
-	assert(db.find(var!User.name.notEqual("Peter")).map!(u => u.id).setEqual([1, 2, 3, 4, 5, 6]));
-	assert(db.find(var!User.age.greaterEqual(33)).map!(u => u.id).setEqual([1, 2, 5, 6, 7]));
-	assert(db.find(var!User.age.greater(33)).map!(u => u.id).setEqual([2, 5, 6, 7]));
-	assert(db.find(var!User.age.less(33)).map!(u => u.id).setEqual([0, 3, 4]));
-	assert(db.find(var!User.age.lessEqual(33)).map!(u => u.id).setEqual([0, 1, 3, 4]));
 
-	//
-	// basic contains query
-	//
-	assert(db.find(var!User.friends.contains(4)).map!(u => u.name).setEqual(["Tom", "Russel"]));
+	if (flags & TestFlags.relationalCompare) {
+		//
+		// relational comparison queries
+		//
+		assert(db.find(var!User.name.notEqual("Peter")).map!(u => u.id).setEqual([1, 2, 3, 4, 5, 6]));
+		assert(db.find(var!User.age.greaterEqual(33)).map!(u => u.id).setEqual([1, 2, 5, 6, 7]));
+		assert(db.find(var!User.age.greater(33)).map!(u => u.id).setEqual([2, 5, 6, 7]));
+		assert(db.find(var!User.age.less(33)).map!(u => u.id).setEqual([0, 3, 4]));
+		assert(db.find(var!User.age.lessEqual(33)).map!(u => u.id).setEqual([0, 1, 3, 4]));
+	}
 
-	//
-	// basic updates
-	//
-	db.update(var!User.id(2), set!User.name("Thomas"));
-	assert(db.find(var!User.name("Tom")).empty);
-	assert(db.findOne(var!User.name("Thomas")).id == 2);
+	if (flags & TestFlags.containsCompare) {
+		//
+		// basic contains query
+		//
+		assert(db.find(var!User.friends.contains(4)).map!(u => u.name).setEqual(["Tom", "Russel"]));
+	}
+
+	if (flags & TestFlags.basicUpdates) {
+		//
+		// basic updates
+		//
+		db.update(var!User.id(2), set!User.name("Thomas"));
+		assert(db.find(var!User.name("Tom")).empty);
+		assert(db.findOne(var!User.name("Thomas")).id == 2);
+	}
 
 	//db.update(var!Group.id(2), )
 
