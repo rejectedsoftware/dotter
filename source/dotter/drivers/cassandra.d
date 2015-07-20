@@ -37,7 +37,6 @@ class CassandraDriver(TABLES) {
 	alias Tables = TABLES;
 	alias TableTypes = TypeTuple!(typeof(TABLES.tupleof));
 	enum fieldTableNames = getFieldTableNames!TABLES();
-	pragma(msg, fieldTableNames);
 
 	private {
 		CassandraKeyspace m_keyspace;
