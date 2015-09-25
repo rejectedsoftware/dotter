@@ -1,10 +1,12 @@
 {
 	"fileVersion": 1,
 	"versions": {
-		"libevent": "~master",
-		"vibe-d": "0.7.20-alpha.1+commit.65.gbea1ac0",
-		"openssl": "~master",
-		"libev": "~master",
+		"libevent": "2.0.1+2.0.16",
+		"libev": "5.0.0+4.04",
+		"openssl": "1.1.4+1.0.1g",
+		"memutils": "0.4.1",
+		"vibe-d": "0.7.25+commit.56.g6e1ddbd",
+		"libasync": "0.7.5",
 		"mysql-native": "0.0.14"
 	}
 }
