@@ -1,0 +1,6 @@
+*.dll
+*.exe
+*.lib
+*.a
+__test_library__
+/.dub
