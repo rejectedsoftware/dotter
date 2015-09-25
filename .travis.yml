@@ -1,0 +1,9 @@
+language: d
+
+d:
+  - dmd-2.068.2
+
+services:
+  - mongodb
+
+sudo: false
