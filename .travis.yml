@@ -4,6 +4,8 @@ d:
   - dmd-2.068.2
 
 services:
+  - cassandra
   - mongodb
+  - mysql
 
 sudo: false
