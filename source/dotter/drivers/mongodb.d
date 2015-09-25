@@ -19,6 +19,7 @@ import dotter.orm;
 
 import std.traits;
 import std.typetuple;
+import vibe.data.bson;
 import vibe.data.serialization;
 import vibe.db.mongo.mongo;
 

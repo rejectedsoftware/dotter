@@ -334,7 +334,7 @@ private struct MatchRange(bool allow_modfications, T, QUERY, DRIVER)
 
 size_t[] tableIndicesOf(TABLES...)(string[] names)
 {
-	import std.array : startsWith;
+	import std.algorithm : startsWith;
 	auto ret = new size_t[names.length];
 	ret[] = size_t.max;
 	foreach (i, T; TABLES)
