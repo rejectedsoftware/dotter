@@ -115,6 +115,7 @@ unittest {
 	catch (Exception e) {
 		import vibe.core.log;
 		logWarn("Failed to connect to local MongoDB server. Skipping test.");
+		logWarn("Error: %s", e.msg);
 		return;
 	}
 	testDriver!(createDriver)(TestFlags.full, db);
